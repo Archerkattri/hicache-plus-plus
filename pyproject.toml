@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Training-free diffusion inference acceleration via exponential (DMD/Prony) velocity forecasting"
 readme = "README.md"
 requires-python = ">=3.9"
+license = { text = "MIT" }
 dependencies = ["torch"]
 keywords = ["diffusion", "flow-matching", "inference-acceleration", "feature-caching", "dmd", "prony", "hicache", "taylorseer"]
 

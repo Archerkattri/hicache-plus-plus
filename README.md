@@ -8,6 +8,12 @@
 a Dynamic-Mode-Decomposition (Prony) **exponential** basis — exact on the class diffusion
 features actually live in, so it stays lossless at larger skip intervals than the polynomial.*
 
+![training&#8209;free](https://img.shields.io/badge/training--free-%E2%9C%93-2e8f5c)
+&nbsp;![PyTorch](https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white)
+&nbsp;![CPU tests](https://img.shields.io/badge/CPU%20tests-passing-2e8f5c)
+&nbsp;![license MIT](https://img.shields.io/badge/license-MIT-2e6db0)
+&nbsp;![python](https://img.shields.io/badge/python-%E2%89%A53.9-3776ab)
+
 </div>
 
 ---
@@ -36,6 +42,27 @@ lack — so it holds quality at skip intervals where Hermite/Taylor drift.
 > **Headline:** on Hunyuan3D-2.1, HiCache (Hermite) is lossless only up to interval-3
 > (1.81×); at interval-5 it collapses (F-score 0.68). **HiCache++ (DMD) is near-lossless at
 > interval-5 (0.86 ≈ the 0.87 uncached baseline)** — it breaks the polynomial ceiling.
+
+---
+
+## How it compares
+
+Every modern feature cache skips the network on most steps and *forecasts* the velocity;
+they differ in the **basis** used to extrapolate. The basis is what sets the skip ceiling,
+because a diffusion feature trajectory is (locally) a sum of exponentials, not a polynomial:
+
+| Method | Forecast basis | Exact on the feature-ODE class | Extrapolation | Max lossless skip\* |
+|---|---|:--:|:--:|:--:|
+| TaylorSeer | monomial (Taylor) | ✗ | diverges | small |
+| **HiCache** | scaled-Hermite | ✗ | drifts | interval&#8209;3 |
+| FoCa · Padé · Chebyshev | rational / orthogonal poly | ✗ | drifts | small–moderate |
+| **HiCache++** _(this work)_ | **exponential (DMD / Prony)** | **✓ exact** | **bounded, correct asymptotics** | **interval&#8209;5–6** |
+
+<sub>\*measured on Hunyuan3D-2.1 / SAM3D-slat (see Results). A polynomial basis is only a
+local truncation of the exponential, so it is accurate for a tiny skip and diverges as the
+horizon grows; the exponential basis *is* the exact solution class, so it stays lossless
+further out — and DMD admits *fractional* horizons, so it forecasts sub-steps between
+compute steps exactly.</sub>
 
 ---
 

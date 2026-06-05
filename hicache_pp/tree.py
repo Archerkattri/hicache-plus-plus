@@ -1,26 +1,28 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-"""Training-free inference acceleration for SAM 3D flow-matching.
+"""PyTree-aware velocity forecasting — Hermite (HiCache), DMD/Prony (HiCache++), Adaptive-CFG.
 
-Two methods, ported from the TRELLIS / Hunyuan-2.1 acceleration work and
-generalised to SAM3D's **PyTree velocities** (the solver's ``x_t`` and the
-backbone velocity are ``torch.utils._pytree`` structures, not single tensors):
+The tree-aware counterpart of ``hermite`` + ``dmd``, for samplers whose velocity is a
+``torch.utils._pytree`` structure (a dict / nested container of tensors) rather than a
+single tensor — e.g. structured-latent or sparse generators. All three methods operate on
+PyTrees via ``_pytree.tree_map``; the scalar Hermite / finite-difference coefficients (and
+the DMD eigen-spectrum) are shared across leaves, so a forecast is one tree map.
 
-  * **HiCache** — the (CFG-combined) velocity at *skipped* solver steps is
-    forecast with a dual-scaled physicist's Hermite polynomial instead of calling
-    the dynamics function, skipping ``(interval-1)/interval`` of the model
-    evaluations. Hooked at the ODE-solver level (it wraps ``dynamics_fn``).
+  * **HiCache** (Hermite) — at a *skipped* solver step the (CFG-combined) velocity tree is
+    forecast with a dual-scaled physicist's Hermite polynomial instead of calling the
+    dynamics function, skipping ``(interval-1)/interval`` of the evaluations.
 
-  * **Adaptive-CFG** (Adaptive Guidance, arXiv:2312.12487) — once the conditional
-    and unconditional velocities align (cosine >= ``gamma_bar``) the unconditional
-    backbone pass is dropped and the guidance term is reconstructed from cached
-    anchors. Hooked inside ``ClassifierFreeGuidance.inner_forward``. SAM3D's CFG is
-    ``(1+w)*y_cond - w*y_uncond`` (the TRELLIS convention), so the guidance term is
-    ``g = w*(y_cond - y_uncond)`` and ``v_cfg = y_cond + g``.
+  * **HiCache++** (DMD / Prony) — the exponential forecaster (see :mod:`hicache_pp.dmd`),
+    tree-aware: flatten the uniform-spacing snapshot tail to one vector per snapshot, run
+    DMD, and unflatten the prediction back to the tree. Exact on the exponential solution
+    class, so it stays lossless at larger skip intervals than the polynomial.
 
-Everything here is model-agnostic except that it operates on PyTrees via
-``_pytree.tree_map``. The solver / CFG modules call these helpers directly — there
-is NO runtime monkey-patching. The Hermite/finite-difference scalar coefficients
-are identical across all leaves, so a forecast is one ``tree_map`` per order.
+  * **Adaptive-CFG** (Adaptive Guidance, arXiv:2312.12487) — once the conditional and
+    unconditional velocities align (cosine ≥ ``gamma_bar``) the unconditional pass is
+    dropped and the guidance term is reconstructed from cached anchors. With the convention
+    ``v_cfg = (1+w)·y_cond − w·y_uncond`` the guidance term is ``g = w·(y_cond − y_uncond)``
+    and ``v_cfg = y_cond + g``.
+
+Integrate by calling these helpers from the ODE-solver step (see ``integrations/``); there
+is no runtime monkey-patching.
 """
 import math
 from typing import Any, Dict, List, Optional, Tuple
@@ -160,7 +162,7 @@ def _dmd_forecast_flat(snapshots, k, rank=0, ridge=1e-8):
     X, Xp = V[:, :-1], V[:, 1:]
     try:
         U, S, Vh = torch.linalg.svd(X, full_matrices=False)
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 — numerically degenerate fit: fall back to last-value reuse
         return snapshots[-1].clone()
     if rank <= 0:
         rank = int((S > S[0] * 1e-4).sum().clamp(min=1).item())
@@ -172,7 +174,7 @@ def _dmd_forecast_flat(snapshots, k, rank=0, ridge=1e-8):
         evals, W = torch.linalg.eig(Atil)
         Phi = ((Xp @ Vr).to(torch.complex128) * Sinv.unsqueeze(0)) @ W
         b = torch.linalg.lstsq(Phi, V[:, -1].to(torch.complex128).unsqueeze(1)).solution.squeeze(1)
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 — numerically degenerate fit: fall back to last-value reuse
         return snapshots[-1].clone()
     pred = (Phi @ (evals.pow(float(k)) * b)).real
     if not torch.isfinite(pred).all():

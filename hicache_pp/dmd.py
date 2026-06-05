@@ -1,26 +1,28 @@
-"""Exponential (DMD / Prony) feature forecasting for diffusion caching — the open flank.
+"""Exponential (DMD / Prony) velocity forecasting (HiCache++) — the exponential forecaster.
 
-HiCache / TaylorSeer / FoCa / Spectrum / TC-Pade all extrapolate cached features
-with a POLYNOMIAL or RATIONAL basis (monomial, scaled-Hermite, Chebyshev, Pade).
-But a diffusion feature trajectory across timesteps is the solution of a
-(near-)linear feature-ODE, whose *exact* solution class is a sum of (damped /
-oscillatory) EXPONENTIALS — not polynomials. Polynomials diverge under
-extrapolation (which is exactly why every polynomial caching method, ours
-included, caps out at a modest skip: Hunyuan-2.1 lossless ceiling i3/order-2 =
-1.81x). A sum-of-exponentials has the correct asymptotics and stays bounded.
+Existing feature caches (TaylorSeer, HiCache, FoCa, Padé / Chebyshev variants) extrapolate
+the cached velocity with a POLYNOMIAL or RATIONAL basis. But a diffusion feature trajectory
+across timesteps is the solution of a (near-)linear feature-ODE, whose *exact* solution
+class is a sum of (damped / oscillatory) EXPONENTIALS — not polynomials. A polynomial is
+only a local truncation of that exponential and diverges under extrapolation, which is why
+every polynomial cache caps out at a modest skip interval; a sum of exponentials has the
+correct asymptotics and stays bounded.
 
-This module forecasts the next cached feature with **Dynamic Mode Decomposition**
-(Schmid 2010) — the multivariate, SVD-regularised generalisation of **Prony's
-method** (1795) / the **Matrix-Pencil** method (Hua-Sarkar 1990): identify the
-linear propagator A from snapshots (F_{t+1} ~= A F_t), eigendecompose it once, and
-predict any horizon k by eigenvalue powers,
+This module forecasts the next cached velocity with **Dynamic Mode Decomposition**
+(Schmid 2010) — the multivariate, SVD-regularised generalisation of **Prony's method**
+(1795) and the **Matrix-Pencil** method (Hua & Sarkar 1990): identify the linear
+propagator ``A`` from snapshots (``F_{t+1} ≈ A F_t``), eigendecompose it once, and predict
+any (fractional) horizon ``k`` by eigenvalue powers::
 
-    F_{t+k} ~= Phi @ (lambda**k * b),     b = Phi^+ F_t.
+    F_{t+k} ≈ Phi @ (lambda**k * b),     b = Phi^+ F_t
 
-One economy SVD of a [d, n] snapshot matrix (d >> n, n = #cached steps) so it is
-cheap relative to a DiT forward. It is EXACT on exponential trajectories (the
-solution class) — the property polynomials lack. Novel application: diffusion
-feature caching (Prony/DMD not previously applied to it).
+One economy SVD of a ``[d, n]`` snapshot matrix (``d >> n``, ``n`` = number of cached
+steps) makes it cheap relative to a single network forward. It is *exact* on exponential
+trajectories (the solution class) — the property polynomials lack — so it stays lossless
+at larger skip intervals than the polynomial basis.
+
+To our knowledge DMD / Prony has not previously been applied to diffusion feature caching;
+this is the novel contribution.
 """
 from __future__ import annotations
 
@@ -43,7 +45,7 @@ def dmd_forecast(snapshots, k: int, rank: int = 0, ridge: float = 1e-8) -> torch
     X, Xp = V[:, :-1], V[:, 1:]                                                   # [d, n]
     try:
         U, S, Vh = torch.linalg.svd(X, full_matrices=False)                       # U[d,n] S[n] Vh[n,n]
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 — numerically degenerate fit: fall back to last-value reuse
         return snapshots[-1].clone()
     if rank <= 0:
         rank = int((S > S[0] * 1e-4).sum().clamp(min=1).item())
@@ -55,7 +57,7 @@ def dmd_forecast(snapshots, k: int, rank: int = 0, ridge: float = 1e-8) -> torch
         evals, W = torch.linalg.eig(Atil)                                        # poles lambda, [r,r]
         Phi = ((Xp @ Vr).to(torch.complex128) * Sinv.unsqueeze(0)) @ W           # DMD modes [d, r]
         b = torch.linalg.lstsq(Phi, V[:, -1].to(torch.complex128).unsqueeze(1)).solution.squeeze(1)
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 — numerically degenerate fit: fall back to last-value reuse
         return snapshots[-1].clone()
     pred = (Phi @ (evals.pow(float(k)) * b)).real                                # [d]
     if not torch.isfinite(pred).all():

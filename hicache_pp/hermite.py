@@ -1,23 +1,21 @@
-"""HiCache: Hermite-polynomial velocity forecasting for Hunyuan3D-2.1.
+"""Hermite-polynomial velocity forecasting (HiCache) — the polynomial forecaster.
 
-Training-free inference acceleration for the flow-matching denoise loop in
-``Hunyuan3DDiTFlowMatchingPipeline``. The final (CFG-combined) flow-matching
-velocity at *skipped* sampling steps is forecast with a **dual-scaled
-(physicist's) Hermite polynomial** basis instead of a DiT forward pass, so the
-expensive ``self.model(...)`` call is skipped on ``(interval-1)/interval`` of the
-steps. The dual scaling keeps the high-order terms bounded, giving a more stable
-forecast than the equivalent Taylor (monomial) series.
+On a *skipped* step of a flow-matching / diffusion denoise loop, the final
+(CFG-combined) velocity is forecast with a **dual-scaled physicist's Hermite
+polynomial** basis instead of evaluating the network, skipping
+``(interval-1)/interval`` of the forward passes. The dual scaling keeps the
+high-order terms bounded, giving a more stable forecast than the equivalent Taylor
+(monomial) series — TaylorSeer is the special case where the basis is the plain
+monomial ``(-k)^i``.
 
-This is a first-class part of the pipeline (the denoise loop calls these helpers
-directly — there is NO runtime monkey-patching). Enable it with
-``pipe.enable_hicache(...)``.
+The basis and finite-difference core are model-agnostic; integrate it by calling
+``hicache_init`` / ``hicache_decide`` / ``hicache_update_derivatives`` /
+``hicache_forecast`` from your sampling loop (see ``integrations/``).
 
 Reference
 ---------
 HiCache: Training-free Acceleration of Diffusion Models via Hermite Polynomial
-Feature Forecasting (arXiv:2508.16984). Ported from the TRELLIS-v1 implementation
-in ``faster-trellis`` — the Hermite/finite-difference core is model-agnostic; only
-the loop wiring (in ``pipelines.py``) is Hunyuan-specific.
+Feature Forecasting (arXiv:2508.16984).
 
 Method
 ------

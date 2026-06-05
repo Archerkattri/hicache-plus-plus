@@ -206,3 +206,44 @@ python tests/run_tests.py        # all of the above
   estimation; their application to **diffusion feature caching** is, to our knowledge, new.
 - **Adaptive-CFG** (Adaptive Guidance, arXiv:2312.12487) — composable uncond-skip, included in
   the tree module.
+
+## Citation
+
+If you use this library, please cite HiCache++ (this work) and the methods it builds on:
+
+```bibtex
+@misc{hicachepp2026,
+  title  = {HiCache++: Training-free Diffusion Inference Acceleration via Exponential (DMD/Prony) Velocity Forecasting},
+  author = {Attri, Krishi},
+  year   = {2026},
+  note   = {https://github.com/Archerkattri/hicache-plus-plus}
+}
+
+@misc{hicache2025,
+  title  = {HiCache: Training-free Acceleration of Diffusion Models via Hermite Polynomial Feature Forecasting},
+  eprint = {2508.16984}, archivePrefix = {arXiv}, primaryClass = {cs.CV}, year = {2025}
+}
+
+@misc{taylorseer2025,
+  title  = {From Reusing to Forecasting: Accelerating Diffusion Models with TaylorSeers},
+  eprint = {2503.06923}, archivePrefix = {arXiv}, year = {2025}
+}
+
+@article{schmid2010dmd,
+  title   = {Dynamic mode decomposition of numerical and experimental data},
+  author  = {Schmid, Peter J.},
+  journal = {Journal of Fluid Mechanics}, volume = {656}, pages = {5--28}, year = {2010}
+}
+
+@article{hua1990matrixpencil,
+  title   = {Matrix pencil method for estimating parameters of exponentially damped/undamped sinusoids in noise},
+  author  = {Hua, Yingbo and Sarkar, Tapan K.},
+  journal = {IEEE Transactions on Acoustics, Speech, and Signal Processing},
+  volume  = {38}, number = {5}, pages = {814--824}, year = {1990}
+}
+
+@misc{adaptiveguidance2023,
+  title  = {Adaptive Guidance: Training-free Acceleration of Conditional Diffusion Models},
+  eprint = {2312.12487}, archivePrefix = {arXiv}, year = {2023}
+}
+```

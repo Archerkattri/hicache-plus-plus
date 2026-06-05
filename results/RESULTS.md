@@ -130,7 +130,9 @@ forecast over a token-carved SLaT sampler. Swapping *only the SS forecast basis*
 | **HiCache++ (DMD)** | **0.829** | **2.76×** | **−0.010** |
 
 <sub>\*Fast-TRELLIS cited from the published `faster-trellis` table (its upstream env was not set
-up in this run). v1 only — TRELLIS.2 (the 4B v2 model) is pending its own env debugging.</sub>
+up in this run). The TRELLIS.2-4B (v2) carved-hybrid is now benchmarked too — see
+[`hermit-trellis2-plus-plus`](https://github.com/Archerkattri/hermit-trellis2-plus-plus#results)
+(DMD ≈ Hermite at the deployed interval; +0.03–0.04 F-score ahead at intervals 3–4).</sub>
 
 **Finding:** at the deployed ~interval-3 schedule (2.8×), **DMD is the most lossless accelerator**
 (−0.010 vs vanilla, vs Hermite's −0.014) — it beats Hermite by +0.005 at matched speedup. The
@@ -146,4 +148,5 @@ the DMD advantage widens at higher intervals (see §1/§3 and the §0 microbench
 | **SAM3D** | ✅ slat: 1.44× lossless (i3) | ✅ slat: lossless to **i6, 1.56×** |
 | **Fast-SAM3D** | ✅ SS wash (TaylorSeer) · ✅ slat lossless | ✅ slat: lossless to i6 |
 | **TRELLIS v1** | ✅ 0.825 @ 2.82× | ✅ **0.829 @ 2.76×** (most lossless) |
+| **TRELLIS.2-4B (v2)** | ✅ carved-hybrid (Hermite) | ✅ DMD ≈ Hermite @ i2; **+0.03–0.04 ahead @ i3–i4** |
 | **DiT-XL/2 (ImageNet)** | ✅ Taylor + Hermite | ⏳ FID-vs-latency sweep in progress |

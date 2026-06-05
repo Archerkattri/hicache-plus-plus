@@ -173,8 +173,10 @@ Swapping *only* the SS forecast basis Hermite→DMD in `faster-trellis` (same ca
 | **HiCache++ (DMD)** | **0.829** | **2.76×** | **−0.010** |
 
 At the deployed ~interval-3 (2.8×), DMD is the most lossless accelerator (beats Hermite by +0.005
-at matched speed); the margin widens at higher intervals. *(TRELLIS.2 v2 and the DiT-XL/2 ImageNet
-FID-vs-latency table are still pending.)*
+at matched speed); the margin widens at higher intervals. The same holds on **TRELLIS.2-4B (v2)** —
+DMD ties Hermite at the deployed interval and pulls **+0.03–0.04 F-score ahead at intervals 3–4**
+(see [`hermit-trellis2-plus-plus`](https://github.com/Archerkattri/hermit-trellis2-plus-plus#results)).
+*(The DiT-XL/2 ImageNet FID-vs-latency table is still in progress.)*
 
 ---
 

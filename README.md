@@ -16,6 +16,29 @@ features actually live in, so it stays lossless at larger skip intervals than th
 
 </div>
 
+## When to use this repo
+
+These repos are **complementary accelerators, not competing solutions** — each speeds up a *different*
+base generator, and the `+` / `++` suffix is a **method choice**, not a rival product. Pick by
+**(1) which base model you run**, then **(2) which forecast basis you want**:
+
+| base generator | `+` = HiCache (Hermite) | `++` = HiCache++ (DMD) |
+|---|---|---|
+| Hunyuan3D-2.1 | `hunyuan2.1-plus` | `hunyuan2.1-plus-plus` |
+| Hunyuan3D-2 mini | `hunyuan2-plus` | `hunyuan2-plus-plus` |
+| SAM 3D Objects | `sam3d-plus` | `sam3d-plus-plus` |
+| Fast-SAM3D | `fastsam3d-plus` | `fastsam3d-plus-plus` |
+| DiT-XL/2 (ImageNet) | `dit-plus` | `dit-plus-plus` |
+| TRELLIS (v1) | `faster-trellis` | `faster-trellis-plus-plus` |
+| TRELLIS.2-4B (v2) | `hermit-trellis2` | `hermit-trellis2-plus-plus` |
+
+- **`+` (HiCache / scaled-Hermite):** the *published* polynomial velocity-forecast basis — conservative, reproduces the HiCache paper. Use it to deploy the established method.
+- **`++` (HiCache++ / DMD exponential):** our Dynamic-Mode-Decomposition basis — *the same near-lossless quality at wider skip intervals*, where the polynomial diverges. Use it when you push the cache interval for more speed.
+- **standalone / model-agnostic:** [`hicache-plus-plus`](https://github.com/Archerkattri/hicache-plus-plus) — the forecaster itself, to add DMD caching to *your own* diffusion/flow model.
+- **`fast-trellis2`** = the TaylorSeer baseline fork (the upstream "Fast" accel) — the v2 reference point, not a HiCache variant.
+
+> **This repo:** `hicache-plus-plus` — the **standalone HiCache++ forecaster** (DMD/Prony exponential velocity cache) + the Hermite baseline — model-agnostic; the per-model integrations are the sibling repos above.
+
 ---
 
 ## TL;DR

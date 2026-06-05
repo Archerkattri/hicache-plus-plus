@@ -1,36 +1,83 @@
 # A/B results
 
 All numbers are from geometry-preserving A/B runs: the accelerator's output is compared to the
-uncached / baseline geometry (F-score / Chamfer drift) at a matched speed measurement. Gen-time
-notes: numbers marked *(contended)* were measured with another GPU job running and should be
-re-timed solo for a clean speedup; quality (F-score / F1) is unaffected by contention.
+uncached / baseline geometry (F-score / Chamfer drift) at a matched speed measurement. Speedups
+are from solo (uncontended) re-timing. Two reproducibility notes: **(a)** wall-clock is set by the
+DiT-skip schedule, not the basis — Hermite and DMD at the same interval differ only in the cheap
+per-skip formula, so their speedups match; **(b)** the F-score has ±~0.06 run-to-run variance on
+*rotationally symmetric* objects, where Go-ICP alignment is degenerate, so we exclude the one such
+Toys4K object (`ball_000`, a sphere) and cross-check every headline against a second run.
 
-## 1. Hunyuan3D-2.1 — Toys4K, F-score@0.05, n=10 (flat DiT velocities)
+## 0. Controlled microbenchmark — the mechanism, no model
 
-| interval | Hermite (HiCache) | DMD (HiCache++) |
-|---:|---:|---:|
-| baseline (uncached) | 0.867 | 0.867 |
-| i3 (order-2) | **0.888**  (1.81× lossless) | 0.867 |
-| i4 | 0.773 | 0.807 |
-| **i5** | 0.683 | **0.864**  (≈ lossless) |
-| i6 | 0.292 | 0.732 |
+Before the model A/Bs, a controlled study isolates *why* the skip ceiling exists. On synthetic
+trajectories drawn from the exact feature-ODE class (a sum of damped / oscillatory exponentials),
+we cache an 8-step window and forecast `H` steps past it — `H` is the skip reach of interval
+`H+1`. TaylorSeer (the canonical polynomial basis) vs HiCache++ (DMD / exponential):
 
-**Finding:** the polynomial (Hermite) is lossless only to i3 and collapses by i5; the
-exponential (DMD) holds near-baseline quality at i5 — it breaks the polynomial skip ceiling.
+**Clean** — rel. L2 forecast error, 20 seeds × 64-channel × 2 modes (lower is better)
+
+| basis | H=1 | H=2 | H=3 | H=4 | H=6 | H=8 |
+|---|---:|---:|---:|---:|---:|---:|
+| TaylorSeer (polynomial) | 1.5e-02 | 8.0e-02 | 2.6e-01 | 6.2e-01 | 2.3e+00 | 6.5e+00 |
+| **HiCache++ (exponential)** | **4.7e-09** | **1.4e-08** | **3.0e-08** | **5.3e-08** | **1.2e-07** | **2.2e-07** |
+
+**+ 1% snapshot noise**
+
+| basis | H=1 | H=2 | H=3 | H=4 | H=6 | H=8 |
+|---|---:|---:|---:|---:|---:|---:|
+| TaylorSeer (polynomial) | 9.9e-02 | 3.7e-01 | 9.0e-01 | 1.9e+00 | 6.1e+00 | 1.5e+01 |
+| **HiCache++ (exponential)** | **2.4e-02** | **4.7e-02** | **8.0e-02** | **1.1e-01** | **2.0e-01** | **3.1e-01** |
+
+The exponential basis is **exact on the solution class** (~1e-8, flat in `H`); the polynomial
+**diverges** with the horizon — that divergence *is* the skip ceiling, here a 6-to-9 orders-of-
+magnitude gap on clean data. Under noise, DMD's SVD-rank truncation rejects the noise subspace
+where the small exact-interpolating polynomial window amplifies it (DMD ≤ 0.31; polynomial → 15).
+HiCache's scaled-Hermite is a *stabilised* member of the polynomial family (it bounds the
+divergence at a damping-bias cost) — the per-model tables below are the fair HiCache head-to-head.
+
+Reproduce: `python benchmarks/forecast_microbench.py` (CPU, a few seconds).
+
+## 1. Hunyuan3D-2.1 — Toys4K, F-score@0.05 (flat DiT velocities)
+
+Per-interval F-score and clean (solo, uncontended) speedup. Numbers **exclude `ball_000`** — a
+perfect sphere on which Go-ICP alignment is rotationally degenerate, so its post-alignment
+F-score is essentially random per run (that one cell alone swings the 10-object mean by ±0.05–0.07).
+Excluding it, two independent runs agree to ±0.01 (cross-check below).
+
+| interval | Hermite (HiCache) | DMD (HiCache++) | speedup |
+|---:|---:|---:|---:|
+| baseline (uncached) | 0.911 | 0.911 | 1.00× |
+| i3 | **0.876** | 0.852 | 1.72× |
+| i4 | 0.776 | **0.827** | 1.80× |
+| **i5** | 0.735 | **0.860** | 1.79× |
+| i6 | 0.375 | **0.616** | ~2.0× |
+
+**Finding:** Hermite degrades fast as the interval grows (0.88 → 0.78 → 0.74 → 0.38 at i3/i4/i5/i6);
+DMD degrades *gracefully* (0.85 → 0.83 → 0.86 → 0.62), holding ≈0.86 through i5 (baseline 0.91). DMD's
+lead over Hermite **grows with the skip** — +0.05 at i4, +0.13 at i5, +0.24 at i6 — i.e. the exponential
+basis is exactly what extends the lossless skip range. (Wall-clock saturates ~1.8× because the 2.1
+pipeline is only partly DiT — the rest, e.g. VAE decode, is a fixed floor; DMD's payoff is the quality
+headroom at high interval, which converts to speed in DiT-dominated regimes like SAM3D below.)
+
+<sub>Cross-check (baseline / hc-i3 / dmd-i4 / dmd-i5, excl. ball): run A `out_dmd_ab` 0.911 / 0.876 /
+0.827 / 0.860 — run B solo re-time 0.922 / 0.871 / 0.824 / 0.854. All-10 incl. the degenerate sphere:
+baseline 0.87 (run A) vs 0.93 (run B), the ±0.06 swing localised entirely to `ball_000`.</sub>
 
 ## 2. Hunyuan3D-2-mini (deployed prior) — Toys4K, F-score@0.05, n=10
 
-| variant | F@0.05 | gen_s *(contended)* |
+| variant | F@0.05 | gen_s (solo) |
 |---|---:|---:|
-| vanilla | 0.794 | 1.96 |
+| vanilla | 0.794 | 1.89 |
 | HiCache i3/o2 | 0.792 | 1.58 |
 | DMD i4 | 0.792 | 1.59 |
 | **DMD i5** | **0.794**  (exactly lossless) | 1.69 |
 | DMD i6 | 0.695 | 1.71 |
 
-DMD is exactly lossless at i5 on the deployed model. Wall-clock gain here is only ~1.2×
-(vs 2.1's 1.81×) because mini's runtime is VAE-decode-dominated, not DiT-dominated — so
-skipping DiT forwards saves proportionally less. (Quality is the clean signal.)
+DMD is exactly lossless at i5 on the deployed model (mini's F-scores are stable run-to-run —
+the symmetric-object variance above is a 2.1-scale effect). Wall-clock gain here is only ~1.1×
+(vs 2.1's ~1.8×) because mini's runtime is VAE-decode-dominated, not DiT-dominated — so skipping
+DiT forwards saves proportionally less. (Quality is the clean signal.)
 
 ## 3. SAM3D — slat-stage FlowMatching, real weights (PyTree velocities)
 

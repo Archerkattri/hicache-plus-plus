@@ -39,9 +39,10 @@ F_{t+k} ≈ Φ (λ**k ⊙ b),     b = Φ⁺ F_t
 It is **exact on exponential trajectories** (the solution class) — the property polynomials
 lack — so it holds quality at skip intervals where Hermite/Taylor drift.
 
-> **Headline:** on Hunyuan3D-2.1, HiCache (Hermite) is lossless only up to interval-3
-> (1.81×); at interval-5 it collapses (F-score 0.68). **HiCache++ (DMD) is near-lossless at
-> interval-5 (0.86 ≈ the 0.87 uncached baseline)** — it breaks the polynomial ceiling.
+> **Headline:** on Hunyuan3D-2.1, as the skip interval grows the polynomial (Hermite) decays
+> fast — 0.88 → 0.74 → 0.38 at interval 3 / 5 / 6 — while the exponential (DMD) holds: 0.85 →
+> 0.86 → 0.62 (baseline 0.91). **DMD's lead grows with the skip — +0.13 at i5, +0.24 at i6** —
+> the exponential basis is what extends the lossless skip range.
 
 ---
 
@@ -91,17 +92,34 @@ across a non-uniform window) HiCache++ falls back to the Hermite forecast for wa
 All accelerators are *training-free and geometry-preserving*; the right A/B is **how far the
 output drifts from the uncached/baseline geometry vs how much faster it runs**.
 
-### Hunyuan3D (flat DiT velocities) — Toys4K F-score@0.05, n=10
+### Mechanism — controlled, no model
 
-| interval | Hermite (HiCache) | **DMD (HiCache++)** |
-|---:|---:|---:|
-| baseline (uncached) | 0.867 | 0.867 |
-| i3 | **0.888** (1.81× lossless) | 0.867 |
-| i4 | 0.773 | **0.807** |
-| **i5** | 0.683 | **0.864**  ← near-lossless |
-| i6 | 0.292 | 0.732 |
+Forecasting `H` steps past an 8-step cached window on synthetic trajectories from the exact
+feature-ODE class — TaylorSeer (polynomial) vs HiCache++ (exponential), rel. L2 error (↓):
 
-On the **deployed Hunyuan3D-2-mini**, DMD is **exactly lossless at i5** (0.794 = baseline 0.794).
+| basis | H=1 | H=2 | H=4 | H=6 | H=8 |
+|---|---:|---:|---:|---:|---:|
+| TaylorSeer (polynomial) | 1.5e-2 | 8.0e-2 | 6.2e-1 | 2.3e0 | 6.5e0 |
+| **HiCache++ (exponential)** | **4.7e-9** | **1.4e-8** | **5.3e-8** | **1.2e-7** | **2.2e-7** |
+
+The exponential basis is **exact** (~1e-8, flat in `H`); the polynomial **diverges** with the
+horizon — that divergence *is* the skip ceiling. Reproduce: `python benchmarks/forecast_microbench.py`.
+
+### Hunyuan3D-2.1 (flat DiT velocities) — Toys4K F-score@0.05
+
+Excludes `ball_000` (a sphere — Go-ICP alignment is rotationally degenerate on it; two runs
+otherwise agree to ±0.01). Speedup is solo / uncontended.
+
+| interval | Hermite (HiCache) | **DMD (HiCache++)** | speedup |
+|---:|---:|---:|---:|
+| baseline (uncached) | 0.911 | 0.911 | 1.00× |
+| i3 | **0.876** | 0.852 | 1.72× |
+| i4 | 0.776 | **0.827** | 1.80× |
+| **i5** | 0.735 | **0.860** | 1.79× |
+| i6 | 0.375 | **0.616** | ~2.0× |
+
+DMD degrades *gracefully* where Hermite collapses, and its lead grows with the interval. On the
+**deployed Hunyuan3D-2-mini**, DMD is **exactly lossless at i5** (0.794 = baseline 0.794).
 
 ### SAM3D (PyTree velocities, slat FlowMatching) — real weights, F1 vs baseline
 
@@ -146,7 +164,8 @@ For **PyTree / structured** velocities (e.g. SAM3D), use `hicache_pp.tree` — t
 tree-aware (`hicache_forecast_tree`, `dmd_forecast_tree`, plus tree Adaptive-CFG).
 
 See [`integrations/`](integrations/) for the exact wiring into Hunyuan3D-2.1, Hunyuan3D-2-mini,
-SAM3D and Fast-SAM3D, and [`results/`](results/) for the full tables.
+SAM3D and Fast-SAM3D, [`benchmarks/`](benchmarks/) for the controlled forecast microbenchmark,
+and [`results/`](results/) for the full tables.
 
 ---
 

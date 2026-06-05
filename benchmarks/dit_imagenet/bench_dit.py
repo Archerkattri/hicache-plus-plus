@@ -55,7 +55,8 @@ class CachedCFG:
         self.reset()
 
     def reset(self):
-        self.state = hicache_init(num_steps=self.p["num_steps"], interval=self.p["interval"],
+        # interval is ignored for method="none"; clamp to a valid value so init never raises.
+        self.state = hicache_init(num_steps=self.p["num_steps"], interval=max(1, self.p["interval"]),
                                   max_order=self.p["order"], first_enhance=self.p["first_enhance"],
                                   sigma=self.p["sigma"],
                                   backend="dmd" if self.method == "dmd" else "hermite")

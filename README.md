@@ -95,15 +95,18 @@ output drifts from the uncached/baseline geometry vs how much faster it runs**.
 ### Mechanism — controlled, no model
 
 Forecasting `H` steps past an 8-step cached window on synthetic trajectories from the exact
-feature-ODE class — TaylorSeer (polynomial) vs HiCache++ (exponential), rel. L2 error (↓):
+feature-ODE class — three forecast bases, rel. L2 error (↓):
 
 | basis | H=1 | H=2 | H=4 | H=6 | H=8 |
 |---|---:|---:|---:|---:|---:|
 | TaylorSeer (polynomial) | 1.5e-2 | 8.0e-2 | 6.2e-1 | 2.3e0 | 6.5e0 |
+| Padé / FoCa (rational) | 4.9e-2 | 1.1e-1 | 2.4e-1 | 5.3e-1 | 1.2e0 |
 | **HiCache++ (exponential)** | **4.7e-9** | **1.4e-8** | **5.3e-8** | **1.2e-7** | **2.2e-7** |
 
-The exponential basis is **exact** (~1e-8, flat in `H`); the polynomial **diverges** with the
-horizon — that divergence *is* the skip ceiling. Reproduce: `python benchmarks/forecast_microbench.py`.
+The exponential basis is **exact** (~1e-8, flat in `H`); the polynomial **diverges**, and the
+rational (Padé / FoCa) improves on it but still diverges — 6-to-9 orders of magnitude behind DMD,
+and under noise the rational basis turns fragile (Froissart poles). That gap *is* the skip ceiling.
+Reproduce: `python benchmarks/forecast_microbench.py`.
 
 ### Hunyuan3D-2.1 (flat DiT velocities) — Toys4K F-score@0.05
 

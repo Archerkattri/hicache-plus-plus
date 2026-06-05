@@ -13,28 +13,32 @@ Toys4K object (`ball_000`, a sphere) and cross-check every headline against a se
 Before the model A/Bs, a controlled study isolates *why* the skip ceiling exists. On synthetic
 trajectories drawn from the exact feature-ODE class (a sum of damped / oscillatory exponentials),
 we cache an 8-step window and forecast `H` steps past it — `H` is the skip reach of interval
-`H+1`. TaylorSeer (the canonical polynomial basis) vs HiCache++ (DMD / exponential):
+`H+1`. Three bases: TaylorSeer (polynomial), Padé / FoCa (rational), HiCache++ (DMD / exponential):
 
 **Clean** — rel. L2 forecast error, 20 seeds × 64-channel × 2 modes (lower is better)
 
 | basis | H=1 | H=2 | H=3 | H=4 | H=6 | H=8 |
 |---|---:|---:|---:|---:|---:|---:|
 | TaylorSeer (polynomial) | 1.5e-02 | 8.0e-02 | 2.6e-01 | 6.2e-01 | 2.3e+00 | 6.5e+00 |
+| Padé / FoCa (rational) | 4.9e-02 | 1.1e-01 | 1.7e-01 | 2.4e-01 | 5.3e-01 | 1.2e+00 |
 | **HiCache++ (exponential)** | **4.7e-09** | **1.4e-08** | **3.0e-08** | **5.3e-08** | **1.2e-07** | **2.2e-07** |
 
 **+ 1% snapshot noise**
 
 | basis | H=1 | H=2 | H=3 | H=4 | H=6 | H=8 |
 |---|---:|---:|---:|---:|---:|---:|
-| TaylorSeer (polynomial) | 9.9e-02 | 3.7e-01 | 9.0e-01 | 1.9e+00 | 6.1e+00 | 1.5e+01 |
-| **HiCache++ (exponential)** | **2.4e-02** | **4.7e-02** | **8.0e-02** | **1.1e-01** | **2.0e-01** | **3.1e-01** |
+| TaylorSeer (polynomial) | 9.9e-02 | 3.5e-01 | 8.8e-01 | 1.9e+00 | 6.1e+00 | 1.5e+01 |
+| Padé / FoCa (rational) | 7.3e-02 | 4.7e-01 | 1.1e+00 | 1.6e+00 | 2.5e+00 | 3.2e+00 |
+| **HiCache++ (exponential)** | **2.2e-02** | **4.7e-02** | **8.4e-02** | **1.2e-01** | **2.1e-01** | **2.9e-01** |
 
 The exponential basis is **exact on the solution class** (~1e-8, flat in `H`); the polynomial
-**diverges** with the horizon — that divergence *is* the skip ceiling, here a 6-to-9 orders-of-
-magnitude gap on clean data. Under noise, DMD's SVD-rank truncation rejects the noise subspace
-where the small exact-interpolating polynomial window amplifies it (DMD ≤ 0.31; polynomial → 15).
-HiCache's scaled-Hermite is a *stabilised* member of the polynomial family (it bounds the
-divergence at a damping-bias cost) — the per-model tables below are the fair HiCache head-to-head.
+**diverges** with the horizon, and the rational (Padé / FoCa) basis improves on the polynomial
+but still diverges — that gap *is* the skip ceiling (6-to-9 orders of magnitude on clean data).
+Under noise, DMD's SVD-rank truncation rejects the noise subspace (DMD ≤ 0.3) where the polynomial
+amplifies it (→ 15) and the rational basis turns fragile (spurious Froissart poles; shown here
+deployed-clamped to last-value reuse → ~3, otherwise it blows up). HiCache's scaled-Hermite is a
+*stabilised* member of the polynomial family — the per-model tables below are the fair HiCache
+head-to-head.
 
 Reproduce: `python benchmarks/forecast_microbench.py` (CPU, a few seconds).
 

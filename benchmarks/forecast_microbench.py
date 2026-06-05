@@ -8,22 +8,26 @@ each method to forecast the feature ``H`` steps past a window of cached anchors 
 skip distance, the furthest a cache extrapolates at interval ``H+1``. We report the mean
 relative L2 error over seeds and anchor positions.
 
-  * **TaylorSeer** — the degree-``order`` monomial extrapolant (the unique polynomial through
-    the last ``order+1`` cached anchors): the canonical polynomial-family cache. HiCache's
-    scaled-Hermite is a *stabilised* member of the same family (it bounds the divergence at the
-    cost of a damping bias); the fair HiCache head-to-head is the per-model A/B in the README,
-    on real diffusion features its basis is tuned for. This microbench isolates the basis
-    question — polynomial vs exponential — with the cleanest polynomial representative.
+  * **TaylorSeer** — the degree-``order`` monomial extrapolant (the unique polynomial through the
+    last ``order+1`` cached anchors): the canonical polynomial-family cache. HiCache's
+    scaled-Hermite is a *stabilised* member of the same family (it bounds the divergence at a
+    damping-bias cost); the fair HiCache head-to-head is the per-model A/B in the README, on real
+    diffusion features its basis is tuned for.
+  * **Pade / FoCa** — a rational [3/2] extrapolant: the FoCa / Pade / Chebyshev rational family.
+    A rational basis fits exponentials better than a polynomial (it improves on Taylor) but is
+    still not the exact class, and its higher orders are fragile (spurious Froissart poles).
   * **HiCache++** — the exponential DMD / Prony forecast (``hicache_pp.dmd``): identify the
     propagator from a rank-truncated window, extrapolate by eigenvalue powers.
 
-The polynomial basis is a *local truncation* of the exponential and diverges as the horizon
-grows; DMD is the exact basis, so its error stays flat. A second pass adds Gaussian snapshot
-noise: the small exact-interpolating polynomial window amplifies it, while DMD's SVD-rank
-truncation rejects the noise subspace.
+The polynomial and rational bases are *truncations / approximations* of the exponential and
+diverge as the horizon grows (rational improves on polynomial but is still inexact and can go
+unstable); DMD is the exact basis, so its error stays flat. A second pass adds Gaussian snapshot
+noise: the small exact-interpolating windows amplify it, while DMD's SVD-rank truncation rejects
+the noise subspace.
 
 CPU only; runs in a few seconds.   Usage:  python benchmarks/forecast_microbench.py
 """
+import math
 import os
 import sys
 
@@ -61,6 +65,40 @@ def forecast_taylor(snaps, horizon, order):
     return powers @ coeffs
 
 
+def forecast_pade(snaps, horizon, L=3, M=2):
+    """Rational [L/M] Pade extrapolant — the FoCa / Pade / Chebyshev rational family. Builds the
+    local Taylor series from backward finite differences, converts it to a Pade approximant per
+    channel, and evaluates ``horizon`` steps ahead. Falls back to last-value reuse on any channel
+    whose denominator goes singular or spurious (the deployed-safe response to the Froissart-doublet
+    instability that makes high-order rational caches fragile — a real cache never ships the blow-up)."""
+    F = torch.stack(snaps, 0)                                     # [n, d]
+    coeffs, cur = [F[-1]], F
+    for k in range(1, L + M + 1):                                 # backward-difference Taylor series
+        cur = cur[1:] - cur[:-1]
+        coeffs.append(cur[-1] / math.factorial(k))
+    C = torch.stack(coeffs, 0)                                    # [L+M+1, d]
+    wmax = F.abs().amax(0)                                        # [d] recent dynamic range per channel
+    h = float(horizon)
+    out = F[-1].clone()                                           # last-value reuse fallback per channel
+    for ch in range(C.shape[1]):
+        cc = C[:, ch]
+        A = torch.stack([torch.stack([cc[L + i - j] for j in range(1, M + 1)]) for i in range(1, M + 1)])
+        b = torch.stack([-cc[L + i] for i in range(1, M + 1)])
+        try:
+            q = torch.linalg.solve(A, b)
+        except Exception:  # noqa: BLE001 — singular denominator system: keep the reuse fallback
+            continue
+        p = torch.stack([cc[i] + sum(cc[i - j] * q[j - 1] for j in range(1, min(i, M) + 1))
+                         for i in range(L + 1)])
+        QH = 1.0 + sum(q[j - 1] * h ** j for j in range(1, M + 1))
+        PH = sum(p[i] * h ** i for i in range(L + 1))
+        if abs(QH) > 1e-3:                                        # reject a near-pole in the extrap range
+            val = PH / QH
+            if torch.isfinite(val) and abs(val) <= 2.0 * wmax[ch]:  # deployed clamp: else last-value reuse
+                out[ch] = val
+    return out
+
+
 def forecast_dmd(snaps, horizon, rank):
     """HiCache++ exponential forecast ``horizon`` steps ahead (integer eigenvalue power)."""
     return dmd_forecast(snaps, horizon, rank=rank)
@@ -70,7 +108,7 @@ def run(noise=0.0, seeds=20, horizons=(1, 2, 3, 4, 6, 8), order=3, history=8, n_
     # auto-rank on clean data finds the true mode count; under noise we cap to the physical
     # signal rank (2 real DOF per complex pole) so the SVD truncation rejects the noise subspace.
     rank = 0 if noise == 0 else 2 * n_modes
-    out = {"TaylorSeer": {}, "HiCache++": {}}
+    out = {"TaylorSeer": {}, "Pade": {}, "HiCache++": {}}
     for Hz in horizons:
         acc = {k: [] for k in out}
         for seed in range(seeds):
@@ -82,6 +120,7 @@ def run(noise=0.0, seeds=20, horizons=(1, 2, 3, 4, 6, 8), order=3, history=8, n_
             truth = traj[(history - 1) + Hz]
             preds = {
                 "TaylorSeer": forecast_taylor(snaps, Hz, order),
+                "Pade": forecast_pade(snaps, Hz),
                 "HiCache++": forecast_dmd(snaps, Hz, rank),
             }
             den = truth.norm() + 1e-12
@@ -95,8 +134,9 @@ def run(noise=0.0, seeds=20, horizons=(1, 2, 3, 4, 6, 8), order=3, history=8, n_
 def md_table(res, horizons):
     cols = "".join(f" H={h} |" for h in horizons)
     lines = [f"| method (rel. L2 error ↓) |{cols}", "|---|" + "".join("---:|" for _ in horizons)]
-    label = {"TaylorSeer": "TaylorSeer (polynomial)", "HiCache++": "HiCache++ (exponential)"}
-    for name in ("TaylorSeer", "HiCache++"):
+    label = {"TaylorSeer": "TaylorSeer (polynomial)", "Pade": "Pade / FoCa (rational)",
+             "HiCache++": "HiCache++ (exponential)"}
+    for name in ("TaylorSeer", "Pade", "HiCache++"):
         cells = "".join(f" {res[name][h]:.2e} |" for h in horizons)
         bold = "**" if name == "HiCache++" else ""
         lines.append(f"| {bold}{label[name]}{bold} |{cells}")
@@ -112,4 +152,4 @@ if __name__ == "__main__":
     print("\n### + 1% snapshot noise\n")
     print(md_table(run(noise=0.01, horizons=horizons), horizons))
     print("\nHiCache++ (DMD) is exact on the solution class, so its error stays flat as H grows;")
-    print("the polynomial basis diverges with H, and the small Taylor window amplifies noise.")
+    print("polynomial diverges, rational (Pade/FoCa) improves but still diverges and goes fragile.")

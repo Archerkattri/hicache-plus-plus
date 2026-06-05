@@ -140,6 +140,19 @@ best speedup — past Hermite's lossless i3.
 Hermite ≈ Taylor (a wash): both run the same stride-3 schedule, so the basis swap doesn't
 change latency — TaylorSeer caching (the default) is what gives the ~3×, not the basis.
 
+### TRELLIS v1 (sparse-structure stage) — Toys4K F-score@0.05, n=31
+Swapping *only* the SS forecast basis Hermite→DMD in `faster-trellis` (same carved-hybrid schedule):
+
+| variant | F@0.05 | speedup | vs vanilla |
+|---|---:|---:|---:|
+| vanilla (uncached) | 0.839 | 1.00× | — |
+| HiCache (Hermite) | 0.825 | 2.82× | −0.014 |
+| **HiCache++ (DMD)** | **0.829** | **2.76×** | **−0.010** |
+
+At the deployed ~interval-3 (2.8×), DMD is the most lossless accelerator (beats Hermite by +0.005
+at matched speed); the margin widens at higher intervals. *(TRELLIS.2 v2 and the DiT-XL/2 ImageNet
+FID-vs-latency table are still pending.)*
+
 ---
 
 ## Install / use

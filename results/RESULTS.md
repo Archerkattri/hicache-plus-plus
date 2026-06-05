@@ -116,10 +116,34 @@ swap doesn't change the DiT-forward count, only the cheap per-skip formula. Tayl
 (the default) is the ~3× accelerator, not HiCache-over-Taylor. (Unlike Hunyuan, which has no
 default caching — so there the basis choice gives real speedups.)
 
-## The 6-cell matrix
+## 5. TRELLIS v1 — Toys4K F-score@0.05, n=31 (sparse-structure stage)
+
+`faster-trellis` accelerates the sparse-structure (SS) stage with a HiCache (Hermite) velocity
+forecast over a token-carved SLaT sampler. Swapping *only the SS forecast basis* Hermite→DMD
+(identical schedule and carving) on the 31-object subset that succeeded for every variant:
+
+| variant | F-score@0.05 | speedup | vs vanilla |
+|---|---:|---:|---:|
+| vanilla (uncached) | 0.839 | 1.00× | — |
+| Fast-TRELLIS | 0.823\* | 2.12× | −0.016 |
+| HiCache (Hermite) | 0.825 | 2.82× | −0.014 |
+| **HiCache++ (DMD)** | **0.829** | **2.76×** | **−0.010** |
+
+<sub>\*Fast-TRELLIS cited from the published `faster-trellis` table (its upstream env was not set
+up in this run). v1 only — TRELLIS.2 (the 4B v2 model) is pending its own env debugging.</sub>
+
+**Finding:** at the deployed ~interval-3 schedule (2.8×), **DMD is the most lossless accelerator**
+(−0.010 vs vanilla, vs Hermite's −0.014) — it beats Hermite by +0.005 at matched speedup. The
+margin is modest *here* because interval-3 is a **low** skip where the polynomial is still decent;
+the DMD advantage widens at higher intervals (see §1/§3 and the §0 microbench).
+
+## The model matrix
 
 | | **HiCache** (polynomial) | **HiCache++** (DMD / exponential) |
 |---|---|---|
-| **Hunyuan3D** | ✅ 2.1: 1.81× lossless (i3) | ✅ lossless at i5 (breaks the ceiling) |
-| **SAM3D** | ✅ slat: 1.44× lossless | ✅ slat: lossless to i6, 1.56× |
-| **Fast-SAM3D** | ✅ SS: wash (TaylorSeer default) · ✅ slat: 1.44× lossless | ✅ slat: lossless to i6, 1.56× |
+| **Hunyuan3D-2.1** | ✅ integrated (Hermite) | ✅ holds ≈0.83 @ i5 vs Hermite 0.74; lead grows with interval |
+| **Hunyuan3D-2 mini** | ✅ integrated | ✅ **exactly lossless** @ i5 (0.794 = baseline) |
+| **SAM3D** | ✅ slat: 1.44× lossless (i3) | ✅ slat: lossless to **i6, 1.56×** |
+| **Fast-SAM3D** | ✅ SS wash (TaylorSeer) · ✅ slat lossless | ✅ slat: lossless to i6 |
+| **TRELLIS v1** | ✅ 0.825 @ 2.82× | ✅ **0.829 @ 2.76×** (most lossless) |
+| **DiT-XL/2 (ImageNet)** | ✅ Taylor + Hermite | ⏳ FID-vs-latency sweep in progress |

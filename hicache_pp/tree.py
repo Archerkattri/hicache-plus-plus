@@ -248,7 +248,7 @@ def adaptive_cfg_decide(state: Dict[str, Any], gamma: Optional[float]) -> bool:
 
 
 def guidance_term_tree(y_cond: Any, y_uncond: Any, strength: float) -> Any:
-    """SAM3D guidance term ``g = strength * (y_cond - y_uncond)`` (leafwise)."""
+    """Guidance term ``g = strength * (y_cond - y_uncond)`` (leafwise)."""
     return _pytree.tree_map(lambda c, u: strength * (c - u), y_cond, y_uncond)
 
 
@@ -281,7 +281,7 @@ def reconstruct_cfg_tree(y_cond: Any, g: Any) -> Any:
 
 
 # --------------------------------------------------------------------------- #
-# CPU unit test (no GPU, no SAM3D model): trees are plain dict-of-tensors      #
+# CPU unit test (no GPU, no model): trees are plain nested dict-of-tensors     #
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":
     torch.manual_seed(0)
@@ -325,7 +325,7 @@ if __name__ == "__main__":
     check("HiCache tree forecast matches explicit Hermite formula leafwise",
           tclose(hicache_forecast_tree(st2), expected, atol=1e-4))
 
-    # 4) Adaptive-CFG: guidance term + reconstruction match full CFG (SAM3D conv).
+    # 4) Adaptive-CFG: guidance term + reconstruction match full CFG ((1+w)c - w*u).
     w = 3.0
     yc = tree(torch.randn(4), torch.randn(2, 3)); yu = tree(torch.randn(4), torch.randn(2, 3))
     g = guidance_term_tree(yc, yu, w)

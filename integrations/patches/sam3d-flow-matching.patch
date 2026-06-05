@@ -1,0 +1,151 @@
+diff --git a/sam3d_objects/model/backbone/generator/flow_matching/model.py b/sam3d_objects/model/backbone/generator/flow_matching/model.py
+index c76b7be..645062b 100644
+--- a/sam3d_objects/model/backbone/generator/flow_matching/model.py
++++ b/sam3d_objects/model/backbone/generator/flow_matching/model.py
+@@ -199,6 +199,35 @@ class FlowMatching(Base):
+ 
+         return t_seq
+ 
++    def enable_hicache(self, **kwargs):
++        """Convenience: enable HiCache on the (Euler) ODE solver. See ODESolver.enable_hicache."""
++        self._solver.enable_hicache(**kwargs)
++        return self
++
++    def enable_dmd(self, **kwargs):
++        """Convenience: enable the DMD/Prony exponential forecaster (HiCache++) on the
++        (Euler) ODE solver. See ODESolver.enable_dmd."""
++        self._solver.enable_dmd(**kwargs)
++        return self
++
++    def disable_hicache(self):
++        self._solver.disable_hicache()
++        return self
++
++    def enable_adaptive_guidance(self, **kwargs):
++        """Convenience: enable Adaptive-CFG on the CFG dynamics (self.reverse_fn). See
++        ClassifierFreeGuidance.enable_adaptive_guidance."""
++        if not hasattr(self.reverse_fn, "enable_adaptive_guidance"):
++            raise RuntimeError(
++                "reverse_fn does not support Adaptive-CFG (not a ClassifierFreeGuidance dynamics)")
++        self.reverse_fn.enable_adaptive_guidance(**kwargs)
++        return self
++
++    def disable_adaptive_guidance(self):
++        if hasattr(self.reverse_fn, "disable_adaptive_guidance"):
++            self.reverse_fn.disable_adaptive_guidance()
++        return self
++
+     def generate_iter(
+         self,
+         x_shape,
+@@ -208,6 +237,9 @@ class FlowMatching(Base):
+     ):
+         x_0 = self._generate_noise(x_shape, x_device)
+         t_seq = self._prepare_t().to(x_device)
++        # Reset per-trajectory Adaptive-CFG state on the CFG dynamics (no-op unless enabled).
++        if hasattr(self.reverse_fn, "reset_adaptive_guidance"):
++            self.reverse_fn.reset_adaptive_guidance(num_steps=len(t_seq) - 1)
+ 
+         for x_t, t in self._solver.solve_iter(
+             self._generate_dynamics,
+@@ -337,6 +369,9 @@ class ConditionalFlowMatching(FlowMatching):
+     ):
+         x_0 = self._generate_noise(x_shape, x_device)
+         t_seq = self._prepare_t().to(x_device)
++        # Reset per-trajectory Adaptive-CFG state on the CFG dynamics (no-op unless enabled).
++        if hasattr(self.reverse_fn, "reset_adaptive_guidance"):
++            self.reverse_fn.reset_adaptive_guidance(num_steps=len(t_seq) - 1)
+ 
+         noise_override = None
+         if "noise_override" in kwargs_conditionals:
+diff --git a/sam3d_objects/model/backbone/generator/flow_matching/solver.py b/sam3d_objects/model/backbone/generator/flow_matching/solver.py
+index ead1b58..636bf72 100644
+--- a/sam3d_objects/model/backbone/generator/flow_matching/solver.py
++++ b/sam3d_objects/model/backbone/generator/flow_matching/solver.py
+@@ -4,6 +4,15 @@ import torch
+ from functools import partial
+ 
+ from sam3d_objects.data.utils import tree_tensor_map
++from .accel import (
++    hicache_init,
++    hicache_decide,
++    hicache_update_tree,
++    hicache_forecast_tree,
++    tree_detach,
++    dmd_update_snapshots_tree,
++    dmd_forecast_tree,
++)
+ 
+ 
+ def linear_approximation_step(x_t, dt, velocity):
+@@ -27,15 +36,44 @@ def gradient(output, x, create_graph: bool = False):
+ 
+ 
+ class ODESolver:
++    def enable_hicache(self, interval: int = 4, max_order: int = 1, first_enhance: int = 2,
++                       end_enhance=None, sigma: float = 0.5):
++        """Enable HiCache (Hermite velocity forecast) — EULER solver only. Forecast the
++        (CFG-combined) velocity tree on skipped steps instead of calling dynamics_fn,
++        skipping (interval-1)/interval of the model evaluations. Training-free; native
++        (the solver calls the accel helpers directly — no monkey-patching)."""
++        self._hicache_cfg = dict(interval=interval, max_order=max_order,
++                                 first_enhance=first_enhance, end_enhance=end_enhance, sigma=sigma)
++        return self
++
++    def enable_dmd(self, interval: int = 4, first_enhance: int = 2, end_enhance=None,
++                   history: int = 5, max_order: int = 2, sigma: float = 0.5):
++        """Enable the DMD/Prony EXPONENTIAL velocity forecaster (exponential analogue of
++        HiCache) on the Euler solver — forecasts skipped-step velocity trees from raw
++        snapshots via fractional eigenvalue powers; Hermite covers warm-up. See accel.py."""
++        self._hicache_cfg = dict(interval=interval, max_order=max_order, first_enhance=first_enhance,
++                                 end_enhance=end_enhance, sigma=sigma, backend="dmd", history=history)
++        return self
++
++    def disable_hicache(self):
++        self._hicache_cfg = None
++        return self
++
+     def step(self, dynamics_fn, x_t, t, dt, *args, **kwargs):
+         raise NotImplementedError
+ 
+     def solve_iter(self, dynamics_fn, x_init, times, *args, **kwargs):
++        # HiCache state is per-trajectory and only valid for a pure Euler solver (exactly
++        # one dynamics_fn evaluation per step). Reset it at the start of every run.
++        cfg = getattr(self, "_hicache_cfg", None)
++        self._hicache = (hicache_init(num_steps=len(times) - 1, **cfg)
++                         if cfg is not None and type(self) is Euler else None)
+         x_t = x_init
+         for t0, t1 in zip(times[:-1], times[1:]):
+             dt = t1 - t0
+             x_t = self.step(dynamics_fn, x_t, t0, dt, *args, **kwargs)
+             yield x_t, t0
++        self._hicache = None
+ 
+     def solve(self, dynamics_fn, x_init, times, *args, **kwargs):
+         for x_t, _ in self.solve_iter(dynamics_fn, x_init, times, *args, **kwargs):
+@@ -46,7 +84,24 @@ class ODESolver:
+ # https://en.wikipedia.org/wiki/Euler_method
+ class Euler(ODESolver):
+     def step(self, dynamics_fn, x_t, t, dt, *args, **kwargs):
+-        velocity = dynamics_fn(x_t, t, *args, **kwargs)
++        hc = getattr(self, "_hicache", None)
++        if hc is not None and hicache_decide(hc) == "forecast":
++            # Forecast the velocity tree from cached anchors; skip dynamics_fn. The
++            # exponential (DMD) backend forecasts from raw velocity snapshots; the default
++            # Hermite backend from finite-difference derivatives.
++            if hc.get("backend") == "dmd":
++                velocity = dmd_forecast_tree(hc)
++            else:
++                velocity = hicache_forecast_tree(hc)
++            hc["step"] += 1
++        else:
++            velocity = dynamics_fn(x_t, t, *args, **kwargs)
++            if hc is not None:
++                vdet = tree_detach(velocity)
++                hicache_update_tree(hc, vdet)
++                if hc.get("backend") == "dmd":
++                    dmd_update_snapshots_tree(hc, vdet, hc["history"])
++                hc["step"] += 1
+         x_tp1 = linear_approximation_step(x_t, dt, velocity)
+         return x_tp1
+ 

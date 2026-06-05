@@ -1,0 +1,169 @@
+diff --git a/sam3d_objects/model/backbone/generator/flow_matching/model.py b/sam3d_objects/model/backbone/generator/flow_matching/model.py
+index 351108e..f2e6d0e 100644
+--- a/sam3d_objects/model/backbone/generator/flow_matching/model.py
++++ b/sam3d_objects/model/backbone/generator/flow_matching/model.py
+@@ -83,6 +83,17 @@ class FlowMatching(Base):
+             solver_method, solver_kwargs
+         )
+ 
++    def enable_hicache(self, **kwargs):
++        """Convenience: enable HiCache (Hermite) velocity-forecast on the (Euler) solver."""
++        self._solver.enable_hicache(**kwargs); return self
++
++    def enable_dmd(self, **kwargs):
++        """Convenience: enable the DMD/Prony exponential forecaster (HiCache++) on the solver."""
++        self._solver.enable_dmd(**kwargs); return self
++
++    def disable_hicache(self):
++        self._solver.disable_hicache(); return self
++
+     def _get_solver(self, solver_method, solver_kwargs):
+         if solver_method in FlowMatching.SOLVER_METHODS:
+             solver = FlowMatching.SOLVER_METHODS[solver_method](**solver_kwargs)
+@@ -215,6 +226,9 @@ class FlowMatching(Base):
+     ):
+         x_0 = self._generate_noise(x_shape, x_device)
+         t_seq = self._prepare_t().to(x_device)
++        # Reset per-trajectory Adaptive-CFG state on the CFG dynamics (no-op unless enabled).
++        if hasattr(self.reverse_fn, "reset_adaptive_guidance"):
++            self.reverse_fn.reset_adaptive_guidance(num_steps=len(t_seq) - 1)
+  
+ 
+         for x_t, t,v in self._solver.solve_iter(
+@@ -350,6 +364,9 @@ class ConditionalFlowMatching(FlowMatching):
+     ):
+         x_0 = self._generate_noise(x_shape, x_device)
+         t_seq = self._prepare_t().to(x_device)
++        # Reset per-trajectory Adaptive-CFG state on the CFG dynamics (no-op unless enabled).
++        if hasattr(self.reverse_fn, "reset_adaptive_guidance"):
++            self.reverse_fn.reset_adaptive_guidance(num_steps=len(t_seq) - 1)
+ 
+         noise_override = None
+         if "noise_override" in kwargs_conditionals:
+@@ -433,6 +450,9 @@ class FlowMatching_faster(FlowMatching):
+     ):
+         x_0 = self._generate_noise(x_shape, x_device)
+         t_seq = self._prepare_t().to(x_device)
++        # Reset per-trajectory Adaptive-CFG state on the CFG dynamics (no-op unless enabled).
++        if hasattr(self.reverse_fn, "reset_adaptive_guidance"):
++            self.reverse_fn.reset_adaptive_guidance(num_steps=len(t_seq) - 1)
+         self._solver.thresh = self.slat_params['slat_thresh']
+         self._solver.ret_steps = self.slat_params['slat_warmup']
+         self._solver.carving_ratio = self.slat_params['slat_token_ratio']
+@@ -526,6 +546,9 @@ class FlowMatching_easy(FlowMatching):
+     ):
+         x_0 = self._generate_noise(x_shape, x_device)
+         t_seq = self._prepare_t().to(x_device)
++        # Reset per-trajectory Adaptive-CFG state on the CFG dynamics (no-op unless enabled).
++        if hasattr(self.reverse_fn, "reset_adaptive_guidance"):
++            self.reverse_fn.reset_adaptive_guidance(num_steps=len(t_seq) - 1)
+  
+         # 步数迭代
+         for x_t, t, v in self._solver.solve_iter(
+@@ -597,6 +620,9 @@ class FlowMatching_taylorseer(FlowMatching):
+     ):
+         x_0 = self._generate_noise(x_shape, x_device)
+         t_seq = self._prepare_t().to(x_device)
++        # Reset per-trajectory Adaptive-CFG state on the CFG dynamics (no-op unless enabled).
++        if hasattr(self.reverse_fn, "reset_adaptive_guidance"):
++            self.reverse_fn.reset_adaptive_guidance(num_steps=len(t_seq) - 1)
+         self.taylor_dic, self.current = taylor_init(self.inference_steps)
+         
+         # 步数迭代
+diff --git a/sam3d_objects/model/backbone/generator/flow_matching/solver.py b/sam3d_objects/model/backbone/generator/flow_matching/solver.py
+index 26e000b..5679a00 100644
+--- a/sam3d_objects/model/backbone/generator/flow_matching/solver.py
++++ b/sam3d_objects/model/backbone/generator/flow_matching/solver.py
+@@ -4,6 +4,10 @@ import torch
+ from functools import partial
+ import time
+ from sam3d_objects.data.utils import tree_tensor_map
++from .accel import (
++    hicache_init, hicache_decide, hicache_update_tree, hicache_forecast_tree,
++    tree_detach, dmd_update_snapshots_tree, dmd_forecast_tree,
++)
+ import numpy as np
+ import torch
+ import torch.nn.functional as F
+@@ -34,15 +38,38 @@ def simple_dynamics(x, t):
+ 
+ 
+ class ODESolver:
++    def enable_hicache(self, interval=4, max_order=1, first_enhance=2, end_enhance=None,
++                       sigma=0.5, backend="hermite", history=5):
++        """HiCache (Hermite, backend='hermite') / DMD (backend='dmd') velocity-tree forecast
++        on the EULER solver — forecast the velocity on skipped steps instead of calling
++        dynamics_fn. Training-free; native (no monkey-patching)."""
++        self._hicache_cfg = dict(interval=interval, max_order=max_order, first_enhance=first_enhance,
++                                 end_enhance=end_enhance, sigma=sigma, backend=backend, history=history)
++        return self
++
++    def enable_dmd(self, interval=4, first_enhance=2, end_enhance=None, history=5, max_order=2, sigma=0.5):
++        """DMD/Prony exponential velocity forecaster (HiCache++); Hermite covers warm-up."""
++        self._hicache_cfg = dict(interval=interval, max_order=max_order, first_enhance=first_enhance,
++                                 end_enhance=end_enhance, sigma=sigma, backend="dmd", history=history)
++        return self
++
++    def disable_hicache(self):
++        self._hicache_cfg = None
++        return self
++
+     def step(self, dynamics_fn, x_t, t, dt, *args, **kwargs):
+         raise NotImplementedError
+ 
+     def solve_iter(self, dynamics_fn, x_init, times, *args, **kwargs):
++        cfg = getattr(self, "_hicache_cfg", None)
++        self._hicache = (hicache_init(num_steps=len(times) - 1, **cfg)
++                         if cfg is not None and type(self) is Euler else None)
+         x_t = x_init
+         for t0, t1 in zip(times[:-1], times[1:]):
+             dt = t1 - t0
+             x_t, v = self.step(dynamics_fn, x_t, t0, dt, *args, **kwargs)
+             yield x_t, t0 ,v
++        self._hicache = None
+ 
+     def solve(self, dynamics_fn, x_init, times, *args, **kwargs):
+         for x_t, _, _, in self.solve_iter(dynamics_fn, x_init, times, *args, **kwargs):
+@@ -53,10 +80,21 @@ class ODESolver:
+ # https://en.wikipedia.org/wiki/Euler_method
+ class Euler(ODESolver):
+     def step(self, dynamics_fn, x_t, t, dt, *args, **kwargs):
+-        # 速度
+-        velocity = dynamics_fn(x_t, t, *args, **kwargs)
++        hc = getattr(self, "_hicache", None)
++        if hc is not None and hicache_decide(hc) == "forecast":
++            # forecast the velocity tree from cached anchors; skip dynamics_fn (the DiT).
++            velocity = dmd_forecast_tree(hc) if hc.get("backend") == "dmd" else hicache_forecast_tree(hc)
++            hc["step"] += 1
++        else:
++            velocity = dynamics_fn(x_t, t, *args, **kwargs)
++            if hc is not None:
++                vdet = tree_detach(velocity)
++                hicache_update_tree(hc, vdet)
++                if hc.get("backend") == "dmd":
++                    dmd_update_snapshots_tree(hc, vdet, hc["history"])
++                hc["step"] += 1
+         x_tp1 = linear_approximation_step(x_t, dt, velocity)
+-        return x_tp1,velocity
++        return x_tp1, velocity
+ 
+ 
+ # https://arxiv.org/abs/2505.05470
+@@ -252,6 +290,17 @@ class Euler_faster_slat(ODESolver):
+ 
+ 
+ # ⭐ easy 版本的求解器 - 专为 slat 设计
++class Euler_easy_ss(Euler):
++    """SS-stage 'easy' solver. The base and TaylorSeer SS paths use the standard Euler
++    step; only ShortCut_easy (not used here) needs a cached 'easy' variant. Defined as a
++    standard-Euler subclass so the module import (model.py) resolves; reset is a no-op."""
++    def __init__(self, *args, **kwargs):
++        super().__init__()
++
++    def reset_state(self):
++        pass
++
++
+ class Euler_easy_slat(ODESolver):
+     def __init__(self, thresh=0.10, ret_steps=3, full_steps=25):
+         """

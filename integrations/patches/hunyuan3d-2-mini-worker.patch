@@ -1,0 +1,23 @@
+diff --git a/manipulation/shapegen/h3d_runner/worker_protocol.py b/manipulation/shapegen/h3d_runner/worker_protocol.py
+index 3b6b228..347929a 100644
+--- a/manipulation/shapegen/h3d_runner/worker_protocol.py
++++ b/manipulation/shapegen/h3d_runner/worker_protocol.py
+@@ -63,6 +63,18 @@ def load_pipeline():
+             replace_vae=True,
+         )
+     flashvdm_sec = time.perf_counter() - flashvdm_t0
++    # Optional HiCache / DMD acceleration (HiCache++ A/B): MANIPULATION_H3D_ACCEL in
++    # {"", hc_i3o2, dmd_i4, dmd_i5, dmd_i6}. No-op on pipelines without the methods.
++    _accel = os.environ.get("MANIPULATION_H3D_ACCEL", "").strip()
++    if _accel and hasattr(pipeline, "enable_dmd"):
++        if _accel == "hc_i3o2":
++            pipeline.enable_hicache(interval=3, max_order=2, first_enhance=3, sigma=0.5)
++        elif _accel == "dmd_i4":
++            pipeline.enable_dmd(interval=4, first_enhance=3, history=5, max_order=2, sigma=0.5)
++        elif _accel == "dmd_i5":
++            pipeline.enable_dmd(interval=5, first_enhance=4, history=6, max_order=3, sigma=0.5)
++        elif _accel == "dmd_i6":
++            pipeline.enable_dmd(interval=6, first_enhance=4, history=6, max_order=3, sigma=0.55)
+     load_sec = time.perf_counter() - t0
+     return pipeline, load_sec, flashvdm_sec
+ 

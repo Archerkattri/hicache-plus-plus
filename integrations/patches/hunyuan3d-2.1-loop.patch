@@ -1,0 +1,152 @@
+diff --git a/hy3dshape/hy3dshape/pipelines.py b/hy3dshape/hy3dshape/pipelines.py
+index 71de472..87b8fdc 100644
+--- a/hy3dshape/hy3dshape/pipelines.py
++++ b/hy3dshape/hy3dshape/pipelines.py
+@@ -30,6 +30,9 @@ from tqdm import tqdm
+ from .models.autoencoders import ShapeVAE
+ from .models.autoencoders import SurfaceExtractors
+ from .utils import logger, synchronize_timer, smart_load_model
++from .hicache import hicache_init, hicache_decide, hicache_update_derivatives, hicache_forecast
++from .hicache_dmd import dmd_update_snapshots, dmd_forecast_state
++from .adaptive_cfg import adaptive_cfg_init, adaptive_cfg_decide, forecast_guidance, cosine_sim, cond_first_half
+ 
+ 
+ def retrieve_timesteps(
+@@ -292,6 +295,57 @@ class Hunyuan3DDiTPipeline:
+                 self.vae = ShapeVAE.from_pretrained(model_path, subfolder=subfolder)
+             self.vae.enable_flashvdm_decoder(enabled=False)
+ 
++    def enable_hicache(self, interval: int = 4, max_order: int = 1, first_enhance: int = 2,
++                       end_enhance: Optional[int] = None, sigma: float = 0.5,
++                       backend: str = "hermite", history: int = 5):
++        """Enable HiCache (Hermite velocity-forecast) acceleration on the flow-matching
++        denoise loop: compute the DiT velocity every ``interval`` steps and forecast it on
++        the rest via a dual-scaled Hermite polynomial, skipping ``(interval-1)/interval`` of
++        the model forwards. Training-free and geometry-preserving (arXiv:2508.16984). Read
++        natively by ``Hunyuan3DDiTFlowMatchingPipeline.__call__`` — no monkey-patching.
++
++        ``backend="dmd"`` swaps the polynomial forecaster for the exponential
++        Prony/DMD one (same schedule; see :func:`enable_dmd`)."""
++        self._hicache_cfg = dict(interval=interval, max_order=max_order,
++                                 first_enhance=first_enhance, end_enhance=end_enhance, sigma=sigma,
++                                 backend=backend, history=history)
++        return self
++
++    def enable_dmd(self, interval: int = 4, first_enhance: int = 2, end_enhance: Optional[int] = None,
++                   history: int = 5, max_order: int = 2, sigma: float = 0.5):
++        """Enable the DMD/Prony **exponential** velocity-forecaster — the exponential
++        analogue of HiCache. Reuses HiCache's compute/skip schedule, but on skipped steps
++        forecasts the CFG-combined velocity by fitting a linear propagator to the recent
++        raw velocity snapshots (Dynamic Mode Decomposition; Schmid 2010 / Prony 1795) and
++        advancing it by a fractional eigenvalue power. The diffusion feature trajectory is
++        the solution of a near-linear feature-ODE — a sum of (damped/oscillatory)
++        exponentials — so this basis is *exact* on the solution class where a polynomial
++        (Hermite/Taylor) forecast drifts, the failure mode that caps HiCache at a modest
++        skip. Hermite covers warm-up / non-uniform windows as the fallback. See
++        ``hicache_dmd.py``. ``max_order``/``sigma`` only parameterise that fallback."""
++        self._hicache_cfg = dict(interval=interval, max_order=max_order,
++                                 first_enhance=first_enhance, end_enhance=end_enhance, sigma=sigma,
++                                 backend="dmd", history=history)
++        return self
++
++    def disable_hicache(self):
++        self._hicache_cfg = None
++        return self
++
++    def enable_adaptive_guidance(self, gamma_bar: float = 0.94, warmup: int = 2, max_order: int = 1):
++        """Enable Adaptive-CFG (Adaptive Guidance, arXiv:2312.12487) on the flow-matching
++        denoise loop: once the conditional/unconditional velocities align
++        (cosine >= ``gamma_bar``) drop the unconditional half of the 2x batch and run a
++        conditional-only forward, reconstructing the guidance term from cached anchors —
++        ~half the model compute on aligned steps. Composes with HiCache (the
++        ``full_stack``). Read natively by the denoise loop — no monkey-patching."""
++        self._adaptive_cfg = dict(gamma_bar=gamma_bar, warmup=warmup, max_order=max_order)
++        return self
++
++    def disable_adaptive_guidance(self):
++        self._adaptive_cfg = None
++        return self
++
+     def to(self, device=None, dtype=None):
+         if dtype is not None:
+             self.dtype = dtype
+@@ -751,21 +805,66 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
+             # logger.info(f'Using guidance embed with scale {guidance_scale}')
+ 
+         with synchronize_timer('Diffusion Sampling'):
++            # HiCache: forecast the CFG-combined velocity on skipped steps (skip the whole
++            # DiT). Adaptive-CFG: on compute steps, once cond/uncond align, run a
++            # conditional-ONLY forward (skip the uncond half of the 2x batch) and
++            # reconstruct the guidance term. Both no-ops unless enabled; they compose.
++            hicache = (hicache_init(num_steps=num_inference_steps, **self._hicache_cfg)
++                       if getattr(self, "_hicache_cfg", None) is not None else None)
++            adacfg = (adaptive_cfg_init(num_steps=num_inference_steps, **self._adaptive_cfg)
++                      if (do_classifier_free_guidance and getattr(self, "_adaptive_cfg", None) is not None)
++                      else None)
++            ntt = self.scheduler.config.num_train_timesteps
+             for i, t in enumerate(tqdm(timesteps, disable=not enable_pbar, desc="Diffusion Sampling:")):
+-                # expand the latents if we are doing classifier free guidance
+-                if do_classifier_free_guidance:
+-                    latent_model_input = torch.cat([latents] * 2)
++                if hicache is not None and hicache_decide(hicache) == "forecast":
++                    # Forecast the final velocity from cached anchors; skip the DiT. The
++                    # exponential (DMD/Prony) backend forecasts from raw velocity snapshots;
++                    # the default Hermite backend from finite-difference derivatives.
++                    if hicache.get("backend") == "dmd":
++                        noise_pred = dmd_forecast_state(hicache)
++                    else:
++                        noise_pred = hicache_forecast(hicache)
++                    hicache["step"] += 1
+                 else:
+-                    latent_model_input = latents
+-
+-                # NOTE: we assume model get timesteps ranged from 0 to 1
+-                timestep = t.expand(latent_model_input.shape[0]).to(latents.dtype)
+-                timestep = timestep / self.scheduler.config.num_train_timesteps
+-                noise_pred = self.model(latent_model_input, timestep, cond, guidance=guidance)
+-
+-                if do_classifier_free_guidance:
+-                    noise_pred_cond, noise_pred_uncond = noise_pred.chunk(2)
+-                    noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
++                    bsz = latents.shape[0]
++                    # keep Adaptive-CFG's step on the real diffusion index i (robust even
++                    # when HiCache skipped earlier steps).
++                    if adacfg is not None:
++                        adacfg["step"] = i
++
++                    if adacfg is not None and not adaptive_cfg_decide(adacfg, adacfg["last_gamma"]):
++                        # Adaptive-CFG skip: conditional-only forward + forecast guidance term.
++                        timestep = (t.expand(bsz).to(latents.dtype)) / ntt
++                        v_cond = self.model(latents, timestep, cond_first_half(cond, bsz), guidance=guidance)
++                        noise_pred = v_cond + forecast_guidance(adacfg["anchors"], i, adacfg["max_order"])
++                        adacfg["n_skip"] += 1
++                    else:
++                        # full forward (2x batch when doing CFG)
++                        if do_classifier_free_guidance:
++                            latent_model_input = torch.cat([latents] * 2)
++                        else:
++                            latent_model_input = latents
++                        timestep = (t.expand(latent_model_input.shape[0]).to(latents.dtype)) / ntt
++                        noise_pred = self.model(latent_model_input, timestep, cond, guidance=guidance)
++                        if do_classifier_free_guidance:
++                            noise_pred_cond, noise_pred_uncond = noise_pred.chunk(2)
++                            noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
++                            if adacfg is not None:
++                                # cache gamma + guidance term g = (w-1)*(cond-uncond) at step i
++                                adacfg["last_gamma"] = cosine_sim(noise_pred_cond, noise_pred_uncond)
++                                g = (guidance_scale - 1.0) * (noise_pred_cond - noise_pred_uncond)
++                                adacfg["anchors"].append((i, g))
++                                keep = adacfg["max_order"] + 2
++                                if len(adacfg["anchors"]) > keep:
++                                    adacfg["anchors"] = adacfg["anchors"][-keep:]
++                                adacfg["n_full"] += 1
++
++                    if hicache is not None:
++                        # cache the final CFG-combined velocity at this compute step
++                        hicache_update_derivatives(hicache, noise_pred.detach())
++                        if hicache.get("backend") == "dmd":
++                            dmd_update_snapshots(hicache, noise_pred.detach(), hicache["history"])
++                        hicache["step"] += 1
+ 
+                 # compute the previous noisy sample x_t -> x_t-1
+                 outputs = self.scheduler.step(noise_pred, t, latents)

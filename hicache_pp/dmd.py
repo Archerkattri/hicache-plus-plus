@@ -1,0 +1,195 @@
+"""Exponential (DMD / Prony) feature forecasting for diffusion caching — the open flank.
+
+HiCache / TaylorSeer / FoCa / Spectrum / TC-Pade all extrapolate cached features
+with a POLYNOMIAL or RATIONAL basis (monomial, scaled-Hermite, Chebyshev, Pade).
+But a diffusion feature trajectory across timesteps is the solution of a
+(near-)linear feature-ODE, whose *exact* solution class is a sum of (damped /
+oscillatory) EXPONENTIALS — not polynomials. Polynomials diverge under
+extrapolation (which is exactly why every polynomial caching method, ours
+included, caps out at a modest skip: Hunyuan-2.1 lossless ceiling i3/order-2 =
+1.81x). A sum-of-exponentials has the correct asymptotics and stays bounded.
+
+This module forecasts the next cached feature with **Dynamic Mode Decomposition**
+(Schmid 2010) — the multivariate, SVD-regularised generalisation of **Prony's
+method** (1795) / the **Matrix-Pencil** method (Hua-Sarkar 1990): identify the
+linear propagator A from snapshots (F_{t+1} ~= A F_t), eigendecompose it once, and
+predict any horizon k by eigenvalue powers,
+
+    F_{t+k} ~= Phi @ (lambda**k * b),     b = Phi^+ F_t.
+
+One economy SVD of a [d, n] snapshot matrix (d >> n, n = #cached steps) so it is
+cheap relative to a DiT forward. It is EXACT on exponential trajectories (the
+solution class) — the property polynomials lack. Novel application: diffusion
+feature caching (Prony/DMD not previously applied to it).
+"""
+from __future__ import annotations
+
+import torch
+
+
+def dmd_forecast(snapshots, k: int, rank: int = 0, ridge: float = 1e-8) -> torch.Tensor:
+    """Forecast the feature ``k`` steps past the newest snapshot via DMD.
+
+    snapshots : list of >=3 tensors (same shape), OLDEST..NEWEST, the cached
+                (CFG-combined) velocities at the recent compute steps.
+    k         : horizon (number of steps past the newest snapshot).
+    Returns a tensor of the snapshot shape. Falls back to last-value reuse if the
+    history is too short or the fit is degenerate.
+    """
+    shp, dt = snapshots[-1].shape, snapshots[-1].dtype
+    if len(snapshots) < 3:
+        return snapshots[-1].clone()
+    V = torch.stack([s.reshape(-1) for s in snapshots], dim=1).to(torch.float64)  # [d, n+1]
+    X, Xp = V[:, :-1], V[:, 1:]                                                   # [d, n]
+    try:
+        U, S, Vh = torch.linalg.svd(X, full_matrices=False)                       # U[d,n] S[n] Vh[n,n]
+    except Exception:  # noqa: BLE001
+        return snapshots[-1].clone()
+    if rank <= 0:
+        rank = int((S > S[0] * 1e-4).sum().clamp(min=1).item())
+    rank = max(1, min(rank, S.numel()))
+    Ur, Sr, Vr = U[:, :rank], S[:rank], Vh[:rank].mH                              # Vr [n, r]
+    Sinv = (1.0 / (Sr + ridge)).to(torch.complex128)
+    Atil = (Ur.mH @ Xp @ Vr).to(torch.complex128) * Sinv.unsqueeze(0)            # [r, r] (= Ur^H Xp Vr Sr^-1)
+    try:
+        evals, W = torch.linalg.eig(Atil)                                        # poles lambda, [r,r]
+        Phi = ((Xp @ Vr).to(torch.complex128) * Sinv.unsqueeze(0)) @ W           # DMD modes [d, r]
+        b = torch.linalg.lstsq(Phi, V[:, -1].to(torch.complex128).unsqueeze(1)).solution.squeeze(1)
+    except Exception:  # noqa: BLE001
+        return snapshots[-1].clone()
+    pred = (Phi @ (evals.pow(float(k)) * b)).real                                # [d]
+    if not torch.isfinite(pred).all():
+        return snapshots[-1].clone()
+    return pred.to(dt).reshape(shp)
+
+
+# ---------------------------------------------------------------------------
+# Stateful integration with the HiCache loop (shares its compute/skip schedule).
+# At a compute step we record the raw (CFG-combined) velocity snapshot; at a skip
+# step we forecast it via DMD on the UNIFORMLY-SPACED tail of those snapshots.
+# ---------------------------------------------------------------------------
+def dmd_update_snapshots(state, feature, history: int = 5) -> None:
+    """Record the CFG-combined velocity at a compute step for the DMD forecaster.
+
+    Stores ``(compute_step_index, velocity)`` and keeps only the most recent
+    ``history`` snapshots — a short, *local* window, because the diffusion
+    feature dynamics are non-autonomous (the propagator drifts across timesteps),
+    so a long window would average over changing dynamics."""
+    snaps = state.setdefault("dmd_snapshots", [])
+    snaps.append((int(state["activated_steps"][-1]), feature.detach()))
+    h = int(state.get("history", history))
+    if len(snaps) > h:
+        del snaps[: len(snaps) - h]
+
+
+def dmd_forecast_state(state) -> torch.Tensor:
+    """DMD forecast of the velocity at the current skip step.
+
+    Uses the longest *uniformly spaced* suffix of the cached snapshots — DMD's
+    propagator advances exactly one fixed snapshot-spacing per application, so a
+    mixed-spacing window (e.g. across the first-enhance boundary, where the
+    compute cadence changes) would corrupt the fit. The skip horizon is expressed
+    in snapshot-spacing units, i.e. a *fractional* power of the DMD eigenvalues
+    ``lambda**(k/spacing)``. Falls back to the Hermite forecast during warm-up or
+    when the uniform window is shorter than 4 — so DMD acts only where it is valid
+    and the polynomial path covers the rest.
+
+    The window floor is **4 snapshots (3 pairs)**, not 3: a real-valued trajectory
+    spends two real degrees of freedom on every *complex* pole (a conjugate pair
+    ``r e^{+-i w}`` -> ``r^t cos(wt), r^t sin(wt)``), so even a single oscillatory
+    mode needs rank 3 to identify, which needs 3 snapshot-pairs. With only 2 pairs
+    the fit aliases (empirically ~2e-1 vs ~5e-9 at 3 pairs)."""
+    snaps = state.get("dmd_snapshots", [])
+    if len(snaps) >= 4:
+        steps = [s for s, _ in snaps]
+        spacing = steps[-1] - steps[-2]
+        if spacing > 0:
+            # longest uniform-spacing suffix (walk back while the gap stays equal)
+            tail = [snaps[-1], snaps[-2]]
+            j = len(snaps) - 2
+            while j - 1 >= 0 and steps[j] - steps[j - 1] == spacing:
+                tail.append(snaps[j - 1])
+                j -= 1
+            if len(tail) >= 4:
+                vels = [v for _, v in reversed(tail)]            # oldest..newest
+                k = (state["step"] - steps[-1]) / spacing        # fractional horizon
+                return dmd_forecast(vels, k)
+    try:                                                         # lazy: keep standalone-testable
+        from .hermite import hicache_forecast
+    except ImportError:
+        from hermite import hicache_forecast
+    return hicache_forecast(state)
+
+
+# ---------------------------------------------------------------------------
+# CPU unit test: DMD is EXACT on an exponential trajectory; a polynomial drifts.
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    torch.manual_seed(0)
+    ok = True
+
+    def check(name, cond):
+        global ok
+        ok = ok and bool(cond)
+        print(f"[{'PASS' if cond else 'FAIL'}] {name}")
+
+    # Synthetic feature trajectory = sum of 2 damped/oscillatory exponentials (the
+    # feature-ODE solution class). d=16 channels, shared poles, per-channel amplitudes.
+    d, T = 16, 14
+    z = torch.tensor([0.92 * torch.exp(torch.tensor(0.35j)), torch.tensor(0.70 + 0j)],
+                     dtype=torch.complex128)                       # 2 poles |z|<1
+    A = torch.randn(d, 2, dtype=torch.complex128)                 # per-channel amplitudes
+    def true_v(t):
+        return (A @ (z ** t)).real.to(torch.float64)              # F_t = Re(sum a_j z_j^t)
+    traj = [true_v(t) for t in range(T)]
+
+    # cache the first 5 steps, forecast steps 5,6,7 (k=1,2,3 past the newest)
+    hist = traj[:5]
+    for k in (1, 2, 3):
+        pred = dmd_forecast(hist, k)
+        tgt = traj[4 + k]
+        rel = (pred - tgt).norm() / tgt.norm()
+        check(f"DMD exact on exponential traj @ k={k} (rel err {rel:.2e} < 1e-6)", rel < 1e-6)
+
+    # contrast: a degree-2 polynomial (Taylor/finite-diff) extrapolation DRIFTS on the
+    # same exponential signal — the failure mode that caps HiCache.
+    def poly2_forecast(h, k):
+        f0, f1, f2 = h[-3], h[-2], h[-1]                          # last 3, uniform spacing
+        d1 = f2 - f1                                              # 1st diff
+        d2 = (f2 - f1) - (f1 - f0)                                # 2nd diff
+        x = float(k)
+        return f2 + d1 * x + 0.5 * d2 * x * (x - 1)               # Newton forward, degree 2
+    rel_dmd = (dmd_forecast(hist, 3) - traj[7]).norm() / traj[7].norm()
+    rel_poly = (poly2_forecast(hist, 3) - traj[7]).norm() / traj[7].norm()
+    check(f"DMD beats degree-2 poly on exponential extrap @k=3 "
+          f"(dmd {rel_dmd:.2e} << poly {rel_poly:.2e})", rel_dmd < 0.01 * rel_poly)
+
+    # robustness: short history -> graceful last-value fallback (no crash)
+    check("short history -> fallback (no crash)",
+          torch.equal(dmd_forecast(traj[:2], 2), traj[1]))
+
+    # stateful: forecast a SUB-step from 4 snapshots spaced 3 apart. DMD identifies the
+    # 3-step propagator (poles z^3); the fractional horizon k=(11-10)/3 takes the
+    # principal 1/3-power back to z, advancing exactly one step -> traj[11]. (3 pairs
+    # are needed because the complex pole costs 2 real DOF -- see the floor in
+    # dmd_forecast_state; 2 pairs would alias.)
+    st_uni = {"step": 11, "history": 5,
+              "dmd_snapshots": [(1, traj[1]), (4, traj[4]), (7, traj[7]), (10, traj[10])]}
+    rel_sub = (dmd_forecast_state(st_uni) - traj[11]).norm() / traj[11].norm()
+    check(f"DMD sub-step via uniform tail @ spacing 3 (rel {rel_sub:.2e} < 1e-5)", rel_sub < 1e-5)
+
+    # the uniform-tail walk drops a non-uniform leading snapshot (step 0, spacing 1)
+    st_mix = {"step": 11, "history": 6,
+              "dmd_snapshots": [(0, traj[0]), (1, traj[1]), (4, traj[4]), (7, traj[7]), (10, traj[10])]}
+    rel_mix = (dmd_forecast_state(st_mix) - traj[11]).norm() / traj[11].norm()
+    check(f"DMD ignores non-uniform leading snapshot (rel {rel_mix:.2e} < 1e-5)", rel_mix < 1e-5)
+
+    # below the 4-snapshot floor -> Hermite fallback (here only order-0 cached -> last value)
+    st_short = {"step": 8, "history": 5, "sigma": 0.5,
+                "dmd_snapshots": [(4, traj[4]), (7, traj[7])],
+                "derivatives": {0: traj[7]}, "activated_steps": [7]}
+    check("DMD < 4 snapshots -> Hermite fallback (last value)",
+          torch.allclose(dmd_forecast_state(st_short), traj[7]))
+
+    print("\nALL PASS" if ok else "\nSOME FAILED")
+    raise SystemExit(0 if ok else 1)

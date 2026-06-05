@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hicache-pp"
+version = "0.1.0"
+description = "Training-free diffusion inference acceleration via exponential (DMD/Prony) velocity forecasting"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["torch"]
+keywords = ["diffusion", "flow-matching", "inference-acceleration", "feature-caching", "dmd", "prony", "hicache", "taylorseer"]
+
+[tool.setuptools.packages.find]
+include = ["hicache_pp*"]

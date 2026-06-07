@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,8 +9,25 @@ description = "Training-free diffusion inference acceleration via exponential (D
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-dependencies = ["torch"]
+authors = [{ name = "Krishi Attri" }]
 keywords = ["diffusion", "flow-matching", "inference-acceleration", "feature-caching", "dmd", "prony", "hicache", "taylorseer"]
+dependencies = ["torch"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://github.com/Archerkattri/hicache-plus-plus"
+Repository = "https://github.com/Archerkattri/hicache-plus-plus"
 
 [tool.setuptools.packages.find]
 include = ["hicache_pp*"]

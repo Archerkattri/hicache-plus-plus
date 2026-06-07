@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/logo.png" alt="HiCache++" width="170">
+
 # HiCache++
 
 **Training-free diffusion inference acceleration by *exponential* velocity forecasting.**

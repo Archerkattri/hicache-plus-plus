@@ -10,11 +10,10 @@
 a Dynamic-Mode-Decomposition (Prony) **exponential** basis — exact on the class diffusion
 features actually live in, so it stays lossless at larger skip intervals than the polynomial.*
 
-![training&#8209;free](https://img.shields.io/badge/training--free-%E2%9C%93-2e8f5c)
-&nbsp;![PyTorch](https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white)
-&nbsp;![CPU tests](https://img.shields.io/badge/CPU%20tests-passing-2e8f5c)
-&nbsp;![license MIT](https://img.shields.io/badge/license-MIT-2e6db0)
-&nbsp;![python](https://img.shields.io/badge/python-%E2%89%A53.9-3776ab)
+[![PyPI](https://img.shields.io/pypi/v/hicache-pp)](https://pypi.org/project/hicache-pp/)
+&nbsp;[![License](https://img.shields.io/badge/license-MIT-2e6db0.svg)](LICENSE)
+&nbsp;[![Python](https://img.shields.io/badge/python-%E2%89%A53.9-3776ab.svg)](pyproject.toml)
+&nbsp;[![arXiv](https://img.shields.io/badge/arXiv-2508.16984-b31b1b.svg)](https://arxiv.org/abs/2508.16984)
 
 </div>
 

@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/logo.png" alt="HiCache++" width="170">
+<img src="assets/banner.png" alt="HiCache++" width="680">
 
 # HiCache++
 

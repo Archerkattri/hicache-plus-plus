@@ -15,6 +15,7 @@ run(){ CUDA_VISIBLE_DEVICES=$GPU OMP_NUM_THREADS=6 "$PY" "$HERE/bench_dit.py" \
 
 echo "=== DiT FID sweep: N=$N steps=$STEPS gpu=$GPU out=$OUT ==="
 run none 0          # uncached baseline
+run hermite 1       # CONTROL: interval-1 = zero forecast -> must read ~0 FID once noise is paired
 run taylor 3        # TaylorSeer (monomial)
 run hermite 2; run hermite 3; run hermite 4          # HiCache (Hermite)
 run dmd 2; run dmd 3; run dmd 4; run dmd 5            # HiCache++ (DMD)

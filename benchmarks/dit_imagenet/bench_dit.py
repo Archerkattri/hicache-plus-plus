@@ -138,6 +138,15 @@ def main():
         z = torch.randn(b, 4, 32, 32, generator=g, device=dev)
         z = torch.cat([z, z], 0)
         y_in = torch.cat([y, torch.full_like(y, 1000)], 0)
+        # Pair the per-step ancestral noise across cells. p_sample_loop's internal
+        # th.randn_like draws from the GLOBAL generator, so seed it identically per
+        # batch (same across every cell, since batch size and `done` match). Without
+        # this each cell is a separate process with independent per-step noise, so
+        # even a lossless cache scores a large spurious FID-vs-baseline — a pure
+        # measurement floor, not cache drift. (DiT eval has no other global-RNG draws,
+        # so this fully pairs the trajectories: a zero-forecast cell -> FID ~ 0.)
+        torch.manual_seed(args.seed + done)
+        torch.cuda.manual_seed_all(args.seed + done)
         cached.reset()
         torch.cuda.synchronize(dev); t0 = time.time()
         s = diffusion.p_sample_loop(cached, z.shape, z, clip_denoised=False,

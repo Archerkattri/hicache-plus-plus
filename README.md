@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/banner.png" alt="HiCache++" width="680">
+<img src="https://raw.githubusercontent.com/Archerkattri/hicache-plus-plus/master/assets/banner.png" alt="HiCache++" width="680">
 
 # HiCache++
 

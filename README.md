@@ -151,7 +151,15 @@ feature-ODE class — three forecast bases, rel. L2 error (↓):
 The exponential basis is **exact** (~1e-8, flat in `H`); the polynomial **diverges**, and the
 rational (Padé / FoCa) improves on it but still diverges — 6-to-9 orders of magnitude behind the
 exponential, and under noise the rational basis turns fragile (Froissart poles). That gap *is*
-the skip ceiling. Reproduce: `python benchmarks/forecast_microbench.py`.
+the skip ceiling. And when the dynamics are NOT clean — an abrupt regime switch inside the
+cached window, where a whole-window exponential fit misfits — the holdout-selected
+`backend="auto"` catches it every time (it backcasts the newest snapshot with both bases and
+serves the winner): on the switch stress it picks the safe fallback in 120/120 windows and cuts
+the long-horizon error ~3x vs a forced exponential fit (H=8: 3.1 vs 9.4 rel. error, with the
+polynomial at 106), while on clean/drifting/noisy trajectories it picks the exponential basis
+120/120 and matches it exactly. Full five-scenario tables:
+[`benchmarks/MICROBENCH_RESULTS.md`](benchmarks/MICROBENCH_RESULTS.md). Reproduce:
+`python benchmarks/forecast_microbench.py`.
 
 ### DiT-XL/2 ImageNet — FID-50k / IS vs latency
 

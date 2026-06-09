@@ -104,41 +104,118 @@ def forecast_dmd(snaps, horizon, rank):
     return dmd_forecast(snaps, horizon, rank=rank)
 
 
-def run(noise=0.0, seeds=20, horizons=(1, 2, 3, 4, 6, 8), order=3, history=8, n_modes=2):
+def make_traj_drift(T, d=64, n_modes=2, seed=0, w_drift=0.6, r_drift=0.10):
+    """A NON-AUTONOMOUS trajectory: locally a sum of exponentials, but the pole
+    frequencies/decays drift across the horizon (w_t = w0*(1 + w_drift*t/T), and
+    log r drifts similarly). This models the regime the holdout 'auto' backend
+    exists for: diffusion feature dynamics whose propagator changes between
+    timestep windows, where a fixed exponential fit can misfit."""
+    g = torch.Generator().manual_seed(seed)
+    r0 = 0.85 + 0.14 * torch.rand(n_modes, generator=g, dtype=torch.float64)
+    w0 = (torch.rand(n_modes, generator=g, dtype=torch.float64) * 2 - 1) * 0.5
+    a = torch.randn(d, n_modes, generator=g, dtype=torch.complex128)
+    logz_acc = torch.zeros(n_modes, dtype=torch.complex128)
+    traj = [(a @ torch.exp(logz_acc)).real.clone()]
+    for t in range(1, T):
+        frac = t / float(T)
+        w_t = w0 * (1.0 + w_drift * frac)
+        logr_t = torch.log(r0) * (1.0 + r_drift * frac)
+        logz_acc = logz_acc + (logr_t + 1j * w_t)
+        traj.append((a @ torch.exp(logz_acc)).real)
+    return traj
+
+
+def make_traj_switch(T, d=64, n_modes=2, seed=0, t_switch=None):
+    """A REGIME-SWITCH trajectory: the poles change abruptly at ``t_switch`` (default:
+    mid-window), so an exponential fit over the whole cached window straddles two
+    different dynamics and misfits. A local polynomial (last few anchors only) sees
+    mostly post-switch data. This is the stress case the holdout 'auto' backend is
+    designed to catch."""
+    g = torch.Generator().manual_seed(seed)
+    if t_switch is None:
+        t_switch = T // 2
+    def poles(gen):
+        r = 0.85 + 0.14 * torch.rand(n_modes, generator=gen, dtype=torch.float64)
+        w = (torch.rand(n_modes, generator=gen, dtype=torch.float64) * 2 - 1) * 0.5
+        return (r * torch.exp(1j * w)).to(torch.complex128)
+    z1, z2 = poles(g), poles(g)
+    a = torch.randn(d, n_modes, dtype=torch.complex128, generator=g)
+    traj, state = [], torch.ones(n_modes, dtype=torch.complex128)
+    for t in range(T):
+        traj.append((a @ state).real)
+        state = state * (z1 if t < t_switch else z2)
+    return traj
+
+
+def forecast_auto(snaps, horizon, max_order=2):
+    """The SHIPPED HiCache++ ``backend='auto'`` path, driven end-to-end through the
+    real state machinery (hicache_init/update + dmd_update_snapshots +
+    auto_forecast_state) -- holdout-selects DMD vs the Hermite fallback per window."""
+    from hicache_pp.hermite import hicache_init, hicache_update_derivatives
+    from hicache_pp.dmd import dmd_update_snapshots, auto_forecast_state
+    st = hicache_init(num_steps=10 ** 6, interval=horizon + 1, max_order=max_order,
+                      first_enhance=0, sigma=0.5, backend="auto", history=len(snaps))
+    for t, F in enumerate(snaps):
+        st["step"] = t
+        st["activated_steps"].append(t)
+        hicache_update_derivatives(st, F)
+        dmd_update_snapshots(st, F, history=len(snaps))
+    st["step"] = (len(snaps) - 1) + horizon
+    return auto_forecast_state(st), st.get("_auto_choice")
+
+
+def run(noise=0.0, seeds=20, horizons=(1, 2, 3, 4, 6, 8), order=3, history=8, n_modes=2,
+        drift=False):
     # auto-rank on clean data finds the true mode count; under noise we cap to the physical
     # signal rank (2 real DOF per complex pole) so the SVD truncation rejects the noise subspace.
-    rank = 0 if noise == 0 else 2 * n_modes
-    out = {"TaylorSeer": {}, "Pade": {}, "HiCache++": {}}
+    rank = 2 * n_modes if (noise or drift) else 0
+    out = {"TaylorSeer": {}, "Pade": {}, "HiCache++": {}, "HiCache++ auto": {}}
+    picks = {}
     for Hz in horizons:
         acc = {k: [] for k in out}
         for seed in range(seeds):
-            traj = make_traj(history + Hz + 2, n_modes=n_modes, seed=seed)
+            T_total = history + Hz + 2
+            if drift == "switch":
+                traj = make_traj_switch(T_total, n_modes=n_modes, seed=seed,
+                                        t_switch=history - 3)
+            elif drift:
+                traj = make_traj_drift(T_total, n_modes=n_modes, seed=seed)
+            else:
+                traj = make_traj(T_total, n_modes=n_modes, seed=seed)
             snaps = [traj[s] for s in range(history)]                 # cached window t=0..history-1
             if noise:
                 snaps = [F + noise * F.norm() / F.numel() ** 0.5 * torch.randn_like(F)
                          for F in snaps]
             truth = traj[(history - 1) + Hz]
+            auto_pred, auto_choice = forecast_auto(snaps, Hz)
+            picks[auto_choice] = picks.get(auto_choice, 0) + 1
             preds = {
                 "TaylorSeer": forecast_taylor(snaps, Hz, order),
                 "Pade": forecast_pade(snaps, Hz),
                 "HiCache++": forecast_dmd(snaps, Hz, rank),
+                "HiCache++ auto": auto_pred,
             }
             den = truth.norm() + 1e-12
             for name, p in preds.items():
                 acc[name].append(((p - truth).norm() / den).item())
         for name in out:
             out[name][Hz] = sum(acc[name]) / len(acc[name])
+    out["_picks"] = picks
     return out
 
 
 def md_table(res, horizons):
+    res = {k: v for k, v in res.items() if not k.startswith("_")}
     cols = "".join(f" H={h} |" for h in horizons)
     lines = [f"| method (rel. L2 error ↓) |{cols}", "|---|" + "".join("---:|" for _ in horizons)]
     label = {"TaylorSeer": "TaylorSeer (polynomial)", "Pade": "Pade / FoCa (rational)",
-             "HiCache++": "HiCache++ (exponential)"}
-    for name in ("TaylorSeer", "Pade", "HiCache++"):
+             "HiCache++": "HiCache++ (exponential)",
+             "HiCache++ auto": "HiCache++ (auto, holdout-selected)"}
+    for name in ("TaylorSeer", "Pade", "HiCache++", "HiCache++ auto"):
+        if name not in res:
+            continue
         cells = "".join(f" {res[name][h]:.2e} |" for h in horizons)
-        bold = "**" if name == "HiCache++" else ""
+        bold = "**" if name.startswith("HiCache++") else ""
         lines.append(f"| {bold}{label[name]}{bold} |{cells}")
     return "\n".join(lines)
 
@@ -150,6 +227,20 @@ if __name__ == "__main__":
     print("### Clean trajectories (20 seeds, 64-channel, 2 modes)\n")
     print(md_table(run(noise=0.0, horizons=horizons), horizons))
     print("\n### + 1% snapshot noise\n")
-    print(md_table(run(noise=0.01, horizons=horizons), horizons))
+    r = run(noise=0.01, horizons=horizons)
+    print(md_table(r, horizons))
+    print(f"\n(auto picked: {r['_picks']})")
+    print("\n### Drifting (non-autonomous) dynamics — why backend='auto' exists\n")
+    r = run(drift=True, horizons=horizons)
+    print(md_table(r, horizons))
+    print(f"\n(auto picked: {r['_picks']})")
+    print("\n### Regime switch inside the cached window — the DMD-misfit stress\n")
+    r = run(drift="switch", horizons=horizons)
+    print(md_table(r, horizons))
+    print(f"\n(auto picked: {r['_picks']})")
+    print("\n### Drifting dynamics + 1% snapshot noise\n")
+    r = run(noise=0.01, drift=True, horizons=horizons)
+    print(md_table(r, horizons))
+    print(f"\n(auto picked: {r['_picks']})")
     print("\nHiCache++ (DMD) is exact on the solution class, so its error stays flat as H grows;")
     print("polynomial diverges, rational (Pade/FoCa) improves but still diverges and goes fragile.")

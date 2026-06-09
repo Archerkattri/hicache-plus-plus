@@ -73,6 +73,16 @@ def tree_detach(a: Any) -> Any:
     return _pytree.tree_map(lambda v: v.detach() if isinstance(v, torch.Tensor) else v, a)
 
 
+def _tree_snapshot(a: Any) -> Any:
+    """detach + clone leafwise. Anything STORED in the cache state across steps
+    must own its storage: a bare detached view shares the pipeline tensor's
+    buffer, which buffer-reusing inference (torch.compile + CUDA graphs) would
+    silently overwrite in place. One memcpy per compute step — negligible next
+    to a network forward."""
+    return _pytree.tree_map(
+        lambda v: v.detach().clone() if isinstance(v, torch.Tensor) else v, a)
+
+
 def tree_cosine(a: Any, b: Any, eps: float = 1e-12) -> float:
     """Cosine similarity over the concatenated leaves of two velocity trees."""
     la = [t.reshape(-1).float() for t in _pytree.tree_leaves(a) if isinstance(t, torch.Tensor)]
@@ -90,8 +100,8 @@ def hicache_init(num_steps, interval=4, max_order=1, first_enhance=2,
         raise ValueError("interval and max_order must be >= 1")
     if not (0.0 < sigma < 1.0):
         raise ValueError(f"sigma must be in (0,1), got {sigma}")
-    if backend not in ("hermite", "dmd"):
-        raise ValueError(f"backend must be 'hermite' or 'dmd', got {backend!r}")
+    if backend not in ("hermite", "dmd", "auto"):
+        raise ValueError(f"backend must be 'hermite', 'dmd', or 'auto', got {backend!r}")
     return {
         "num_steps": int(num_steps), "interval": int(interval), "max_order": int(max_order),
         "first_enhance": int(first_enhance),
@@ -116,7 +126,7 @@ def hicache_decide(state: Dict[str, Any]) -> str:
 
 def hicache_update_tree(state: Dict[str, Any], velocity_tree: Any) -> None:
     prev = state["derivatives"]
-    new_deriv = {0: velocity_tree}
+    new_deriv = {0: _tree_snapshot(velocity_tree)}
     if len(prev) > 0:
         acts = state["activated_steps"]
         dist = max(int(acts[-1] - acts[-2]) if len(acts) >= 2 else state["interval"], 1)

@@ -105,8 +105,8 @@ def hicache_init(
         raise ValueError("max_order must be >= 1")
     if not (0.0 < sigma < 1.0):
         raise ValueError(f"sigma must be in (0, 1), got {sigma}")
-    if backend not in ("hermite", "dmd"):
-        raise ValueError(f"backend must be 'hermite' or 'dmd', got {backend!r}")
+    if backend not in ("hermite", "dmd", "auto"):
+        raise ValueError(f"backend must be 'hermite', 'dmd', or 'auto', got {backend!r}")
     return {
         "num_steps": int(num_steps),
         "interval": int(interval),

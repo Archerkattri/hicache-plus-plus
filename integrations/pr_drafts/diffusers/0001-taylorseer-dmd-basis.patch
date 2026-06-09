@@ -1,0 +1,217 @@
+diff --git a/src/diffusers/hooks/taylorseer_cache.py b/src/diffusers/hooks/taylorseer_cache.py
+index 3031551..c516dba 100644
+--- a/src/diffusers/hooks/taylorseer_cache.py
++++ b/src/diffusers/hooks/taylorseer_cache.py
+@@ -64,6 +64,28 @@ class TaylorSeerCacheConfig:
+             skipping and caching (e.g., skipping blocks and caching projections). This overrides any custom
+             `inactive_identifiers` or `active_identifiers`.
+ 
++        basis (`str`, defaults to `"taylor"`):
++            Forecast basis used on prediction steps. `"taylor"` is the original TaylorSeer polynomial expansion.
++            `"dmd"` replaces it with a Dynamic Mode Decomposition (Prony) *exponential* basis: the linear propagator
++            of each cached output stream is identified from recent full-compute snapshots and extrapolated by
++            eigenvalue powers. Diffusion feature trajectories are (locally) sums of damped/oscillatory exponentials
++            — the exact solution class of the underlying feature-ODE — so the exponential basis stays accurate at
++            larger `cache_interval` where the polynomial expansion diverges. Below the 4-snapshot identifiability
++            floor (or on a non-uniform compute cadence) it automatically falls back to the Taylor expansion. Here
++            "DMD" means Dynamic Mode Decomposition, not Distribution Matching Distillation.
++
++        dmd_history (`int`, defaults to `6`):
++            Number of recent full-compute snapshots retained per output stream for the `"dmd"` basis. Short on
++            purpose — the feature dynamics drift across timesteps. Ignored for `basis="taylor"`.
++
++        dmd_rank (`int`, defaults to `0`):
++            SVD truncation rank for the `"dmd"` fit. `0` selects the rank from the spectrum (modes below `1e-4` of
++            the leading singular value are dropped, which is what rejects noise). Ignored for `basis="taylor"`.
++
++        dmd_ridge (`float`, defaults to `1e-8`):
++            Tikhonov regularization added to the inverted singular values of the `"dmd"` fit. Ignored for
++            `basis="taylor"`.
++
+     Notes:
+         - Patterns are matched using `re.fullmatch` on the module name.
+         - If `skip_predict_identifiers` or `cache_identifiers` are provided, only matching modules are hooked.
+@@ -87,6 +109,14 @@ class TaylorSeerCacheConfig:
+     skip_predict_identifiers: list[str] | None = None
+     cache_identifiers: list[str] | None = None
+     use_lite_mode: bool = False
++    basis: str = "taylor"
++    dmd_history: int = 6
++    dmd_rank: int = 0
++    dmd_ridge: float = 1e-8
++
++    def __post_init__(self):
++        if self.basis not in ("taylor", "dmd"):
++            raise ValueError(f"`basis` must be one of ('taylor', 'dmd'), got {self.basis!r}.")
+ 
+     def __repr__(self) -> str:
+         return (
+@@ -98,24 +128,87 @@ class TaylorSeerCacheConfig:
+             f"taylor_factors_dtype={self.taylor_factors_dtype}, "
+             f"skip_predict_identifiers={self.skip_predict_identifiers}, "
+             f"cache_identifiers={self.cache_identifiers}, "
+-            f"use_lite_mode={self.use_lite_mode})"
++            f"use_lite_mode={self.use_lite_mode}, "
++            f"basis={self.basis}, "
++            f"dmd_history={self.dmd_history}, "
++            f"dmd_rank={self.dmd_rank}, "
++            f"dmd_ridge={self.dmd_ridge})"
+         )
+ 
+ 
++def _dmd_forecast(
++    snapshots: list[torch.Tensor],
++    k: float,
++    rank: int = 0,
++    ridge: float = 1e-8,
++) -> torch.Tensor | None:
++    r"""
++    Forecast a feature `k` snapshot-spacings past the newest snapshot with Dynamic Mode Decomposition (Prony).
++
++    The linear propagator `A` of the snapshot sequence (`Y_{t+1} ≈ A Y_t`) is identified through one economy SVD
++    and eigendecomposed once; any (fractional) horizon is then predicted by eigenvalue powers:
++
++        Y_{t+k} ≈ Φ (λ**k ⊙ b),    b = Φ⁺ Y_t
++
++    Args:
++        snapshots: At least 3 same-shape tensors, oldest to newest, taken at uniformly spaced compute steps.
++        k: Forecast horizon in snapshot-spacing units (fractional values are valid).
++        rank: SVD truncation rank; `0` selects it from the singular-value spectrum.
++        ridge: Tikhonov term added to the inverted singular values.
++
++    Returns:
++        The forecast tensor (snapshot shape), or `None` when the fit is degenerate so the caller can fall back.
++    """
++    if len(snapshots) < 3:
++        return None
++    shape, dtype = snapshots[-1].shape, snapshots[-1].dtype
++    V = torch.stack([s.reshape(-1) for s in snapshots], dim=1).to(torch.float64)
++    X, Xp = V[:, :-1], V[:, 1:]
++    try:
++        U, S, Vh = torch.linalg.svd(X, full_matrices=False)
++    except Exception:
++        return None
++    if rank <= 0:
++        rank = int((S > S[0] * 1e-4).sum().clamp(min=1).item())
++    rank = max(1, min(rank, S.numel()))
++    Ur, Sr, Vr = U[:, :rank], S[:rank], Vh[:rank].mH
++    Sinv = (1.0 / (Sr + ridge)).to(torch.complex128)
++    Atil = (Ur.mH @ Xp @ Vr).to(torch.complex128) * Sinv.unsqueeze(0)
++    try:
++        evals, W = torch.linalg.eig(Atil)
++        Phi = ((Xp @ Vr).to(torch.complex128) * Sinv.unsqueeze(0)) @ W
++        b = torch.linalg.lstsq(Phi, V[:, -1].to(torch.complex128).unsqueeze(1)).solution.squeeze(1)
++    except Exception:
++        return None
++    pred = (Phi @ (evals.pow(float(k)) * b)).real
++    if not torch.isfinite(pred).all():
++        return None
++    return pred.to(dtype).reshape(shape)
++
++
+ class TaylorSeerState:
+     def __init__(
+         self,
+         taylor_factors_dtype: torch.dtype | None = torch.bfloat16,
+         max_order: int = 1,
+         is_inactive: bool = False,
++        basis: str = "taylor",
++        dmd_history: int = 6,
++        dmd_rank: int = 0,
++        dmd_ridge: float = 1e-8,
+     ):
+         self.taylor_factors_dtype = taylor_factors_dtype
+         self.max_order = max_order
+         self.is_inactive = is_inactive
++        self.basis = basis
++        self.dmd_history = dmd_history
++        self.dmd_rank = dmd_rank
++        self.dmd_ridge = dmd_ridge
+ 
+         self.module_dtypes: tuple[torch.dtype, ...] = ()
+         self.last_update_step: int | None = None
+         self.taylor_factors: dict[int, dict[int, torch.Tensor]] = {}
++        self.snapshots: dict[int, list[tuple[int, torch.Tensor]]] = {}
+         self.inactive_shapes: tuple[tuple[int, ...], ...] | None = None
+         self.device: torch.device | None = None
+         self.current_step: int = -1
+@@ -124,6 +217,7 @@ class TaylorSeerState:
+         self.current_step = -1
+         self.last_update_step = None
+         self.taylor_factors = {}
++        self.snapshots = {}
+         self.inactive_shapes = None
+         self.device = None
+ 
+@@ -155,6 +249,13 @@ class TaylorSeerState:
+                 self.taylor_factors[i] = {
+                     order: factor.to(self.taylor_factors_dtype) for order, factor in new_factors.items()
+                 }
++                if self.basis == "dmd":
++                    # detach().clone(): a bare detached view shares storage with the pipeline tensor, so
++                    # buffer-reusing inference (torch.compile / CUDA graphs) could overwrite the history in place.
++                    stream = self.snapshots.setdefault(i, [])
++                    stream.append((self.current_step, features.detach().clone().to(self.taylor_factors_dtype)))
++                    if len(stream) > self.dmd_history:
++                        del stream[: len(stream) - self.dmd_history]
+ 
+         self.last_update_step = self.current_step
+ 
+@@ -184,6 +285,11 @@ class TaylorSeerState:
+             num_orders = len(self.taylor_factors[0])
+             for i in range(num_outputs):
+                 output_dtype = self.module_dtypes[i]
++                if self.basis == "dmd":
++                    prediction = self._predict_dmd(i)
++                    if prediction is not None:
++                        outputs.append(prediction.to(output_dtype))
++                        continue
+                 taylor_factors = self.taylor_factors[i]
+                 output = torch.zeros_like(taylor_factors[0], dtype=output_dtype)
+                 for order in range(num_orders):
+@@ -193,6 +299,34 @@ class TaylorSeerState:
+                 outputs.append(output)
+         return outputs
+ 
++    def _predict_dmd(self, output_index: int) -> torch.Tensor | None:
++        r"""
++        Dynamic Mode Decomposition (Prony) forecast for one output stream, or `None` to fall back to Taylor.
++
++        Only the longest *uniformly spaced* suffix of the snapshot history is used — the identified propagator
++        advances exactly one snapshot-spacing per application, so a mixed-spacing window (e.g. across the warmup
++        boundary) would corrupt the fit. The skip horizon is fractional in snapshot-spacing units. The window floor
++        is 4 snapshots: a real-valued trajectory spends two real degrees of freedom per complex pole, so even one
++        oscillatory mode needs three snapshot pairs to identify.
++        """
++        stream = self.snapshots.get(output_index, [])
++        if len(stream) < 4:
++            return None
++        steps = [step for step, _ in stream]
++        spacing = steps[-1] - steps[-2]
++        if spacing <= 0:
++            return None
++        tail = [stream[-1], stream[-2]]
++        j = len(stream) - 2
++        while j - 1 >= 0 and steps[j] - steps[j - 1] == spacing:
++            tail.append(stream[j - 1])
++            j -= 1
++        if len(tail) < 4:
++            return None
++        velocities = [snapshot for _, snapshot in reversed(tail)]
++        horizon = (self.current_step - steps[-1]) / spacing
++        return _dmd_forecast(velocities, horizon, rank=self.dmd_rank, ridge=self.dmd_ridge)
++
+ 
+ class TaylorSeerCacheHook(ModelHook):
+     _is_stateful = True
+@@ -329,6 +463,10 @@ def _apply_taylorseer_cache_hook(
+             "taylor_factors_dtype": config.taylor_factors_dtype,
+             "max_order": config.max_order,
+             "is_inactive": is_inactive,
++            "basis": config.basis,
++            "dmd_history": config.dmd_history,
++            "dmd_rank": config.dmd_rank,
++            "dmd_ridge": config.dmd_ridge,
+         },
+     )
+ 

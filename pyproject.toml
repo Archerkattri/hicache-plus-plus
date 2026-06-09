@@ -5,12 +5,16 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hicache-pp"
 version = "1.0.0"
-description = "Training-free diffusion inference acceleration via exponential (DMD/Prony) velocity forecasting"
+description = "Drop-in TaylorSeer/HiCache basis upgrade: training-free diffusion acceleration via Dynamic Mode Decomposition (Prony) exponential feature forecasting"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-authors = [{ name = "Krishi Attri" }]
-keywords = ["diffusion", "flow-matching", "inference-acceleration", "feature-caching", "dmd", "prony", "hicache", "taylorseer"]
+authors = [{ name = "Krishi Attri", email = "kattri@snu.ac.kr" }]
+keywords = [
+    "diffusion-acceleration", "feature-caching", "training-free", "flux", "dit",
+    "dynamic-mode-decomposition", "prony", "diffusion", "flow-matching",
+    "inference-acceleration", "hicache", "taylorseer",
+]
 dependencies = ["torch"]
 classifiers = [
     "Development Status :: 4 - Beta",

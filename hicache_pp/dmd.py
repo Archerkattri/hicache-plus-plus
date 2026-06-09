@@ -78,7 +78,11 @@ def dmd_update_snapshots(state, feature, history: int = 5) -> None:
     feature dynamics are non-autonomous (the propagator drifts across timesteps),
     so a long window would average over changing dynamics."""
     snaps = state.setdefault("dmd_snapshots", [])
-    snaps.append((int(state["activated_steps"][-1]), feature.detach()))
+    # detach().clone(): a bare detached view shares storage with the pipeline
+    # tensor, so buffer-reusing inference (torch.compile + CUDA graphs) would
+    # silently overwrite the snapshot history in place. The clone costs nothing
+    # net — a detached view pins the whole original storage anyway.
+    snaps.append((int(state["activated_steps"][-1]), feature.detach().clone()))
     h = int(state.get("history", history))
     if len(snaps) > h:
         del snaps[: len(snaps) - h]
@@ -116,6 +120,68 @@ def dmd_forecast_state(state) -> torch.Tensor:
                 vels = [v for _, v in reversed(tail)]            # oldest..newest
                 k = (state["step"] - steps[-1]) / spacing        # fractional horizon
                 return dmd_forecast(vels, k)
+    try:                                                         # lazy: keep standalone-testable
+        from .hermite import hicache_forecast
+    except ImportError:
+        from hermite import hicache_forecast
+    return hicache_forecast(state)
+
+
+def _poly2_backcast(prefix, k: float) -> torch.Tensor:
+    """Degree-2 Newton-forward extrapolation from the last three of ``prefix``
+    --- the polynomial analogue of the Hermite basis, used only as the holdout
+    yardstick in :func:`auto_forecast_state`."""
+    f0, f1, f2 = prefix[-3], prefix[-2], prefix[-1]
+    d1 = f2 - f1
+    d2 = (f2 - f1) - (f1 - f0)
+    x = float(k)
+    return f2 + d1 * x + 0.5 * d2 * x * (x - 1)
+
+
+def auto_forecast_state(state) -> torch.Tensor:
+    """Holdout-selected forecast: serve DMD only when it *demonstrably* beats
+    the polynomial on the data at hand (``backend="auto"``).
+
+    Diffusion feature dynamics are non-autonomous --- the propagator drifts
+    across timesteps --- so the exponential fit can occasionally misfit a
+    window where the polynomial would have been fine. Rather than trusting
+    either basis a priori, hold out the NEWEST snapshot: fit DMD on the
+    uniform tail *minus* its last snapshot and backcast that held-out
+    snapshot at horizon 1; do the same with the degree-2 polynomial. Whichever
+    basis reproduces the held-out snapshot better is served for the current
+    skip window. The selection is cached per compute step (it can only change
+    when a new snapshot arrives), so the extra cost is one small SVD per
+    *compute* step, amortized over all the skip steps that follow it.
+
+    Falls back exactly like :func:`dmd_forecast_state` (Hermite) when the
+    uniform tail is shorter than 5 (4 to fit + 1 held out)."""
+    snaps = state.get("dmd_snapshots", [])
+    if len(snaps) >= 5:
+        steps = [s for s, _ in snaps]
+        spacing = steps[-1] - steps[-2]
+        if spacing > 0:
+            tail = [snaps[-1], snaps[-2]]
+            j = len(snaps) - 2
+            while j - 1 >= 0 and steps[j] - steps[j - 1] == spacing:
+                tail.append(snaps[j - 1])
+                j -= 1
+            if len(tail) >= 5:
+                vels = [v for _, v in reversed(tail)]            # oldest..newest
+                cache_key = (steps[-1], len(vels))
+                choice = state.get("_auto_choice") \
+                    if state.get("_auto_choice_key") == cache_key else None
+                if choice is None:
+                    held = vels[-1]
+                    denom = held.norm().clamp_min(1e-12)
+                    e_dmd = (dmd_forecast(vels[:-1], 1) - held).norm() / denom
+                    e_poly = (_poly2_backcast(vels[:-1], 1.0) - held).norm() / denom
+                    choice = "dmd" if float(e_dmd) <= float(e_poly) else "hermite"
+                    state["_auto_choice"] = choice
+                    state["_auto_choice_key"] = cache_key
+                if choice == "dmd":
+                    k = (state["step"] - steps[-1]) / spacing
+                    return dmd_forecast(vels, k)
+                # fall through to the Hermite forecast below
     try:                                                         # lazy: keep standalone-testable
         from .hermite import hicache_forecast
     except ImportError:

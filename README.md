@@ -4,11 +4,9 @@
 
 # HiCache++
 
-**Training-free diffusion inference acceleration by *exponential* velocity forecasting.**
-
-*A drop-in upgrade to TaylorSeer / HiCache: replace the polynomial feature-cache basis with
-a Dynamic-Mode-Decomposition (Prony) **exponential** basis — exact on the class diffusion
-features actually live in, so it stays lossless at larger skip intervals than the polynomial.*
+**A drop-in basis upgrade for TaylorSeer / HiCache: forecast cached diffusion features with a
+Dynamic Mode Decomposition (Prony) *exponential* basis instead of a polynomial —
+same schedule, same API, near-lossless at wider skip intervals.**
 
 [![PyPI](https://img.shields.io/pypi/v/hicache-pp)](https://pypi.org/project/hicache-pp/)
 &nbsp;[![License](https://img.shields.io/badge/license-MIT-2e6db0.svg)](LICENSE)
@@ -17,28 +15,54 @@ features actually live in, so it stays lossless at larger skip intervals than th
 
 </div>
 
-## When to use this repo
+Feature caches (TaylorSeer, HiCache) skip the network on most denoising steps and *forecast*
+the velocity from cached anchors — with a **polynomial** basis. But a diffusion feature
+trajectory solves a near-linear feature-ODE whose exact solution class is a sum of damped /
+oscillatory **exponentials**; polynomials only locally truncate that class and diverge under
+extrapolation, which is exactly why every polynomial cache caps out at a modest skip interval.
+**HiCache++** swaps in the exponential basis — Dynamic Mode Decomposition (Prony) — and keeps
+quality at skip intervals where the polynomial collapses. One loop, no training, no model edits:
 
-These repos are **complementary accelerators, not competing solutions** — each speeds up a *different*
-base generator, and the `+` / `++` suffix is a **method choice**, not a rival product. Pick by
-**(1) which base model you run**, then **(2) which forecast basis you want**:
+```python
+import torch
+from hicache_pp import hicache_init, hicache_decide, hicache_update_derivatives
+from hicache_pp import dmd_update_snapshots, dmd_forecast_state   # the exponential forecaster
 
-| base generator | `+` = HiCache (Hermite) | `++` = HiCache++ (DMD) |
-|---|---|---|
-| Hunyuan3D-2.1 | `hunyuan2.1-plus` | `hunyuan2.1-plus-plus` |
-| Hunyuan3D-2 mini | `hunyuan2-plus` | `hunyuan2-plus-plus` |
-| SAM 3D Objects | `sam3d-plus` | `sam3d-plus-plus` |
-| Fast-SAM3D | `fastsam3d-plus` | `fastsam3d-plus-plus` |
-| DiT-XL/2 (ImageNet) | `dit-plus` | `dit-plus-plus` |
-| TRELLIS (v1) | `faster-trellis` | `faster-trellis-plus-plus` |
-| TRELLIS.2-4B (v2) | `hermit-trellis2` | `hermit-trellis2-plus-plus` |
+state = hicache_init(num_steps=N, interval=5, first_enhance=4, backend="dmd", history=6)
+for i, t in enumerate(timesteps):
+    if hicache_decide(state) == "forecast":
+        v = dmd_forecast_state(state)            # skip the network — forecast the velocity
+    else:
+        v = model(x, t, ...)                     # the expensive forward
+        hicache_update_derivatives(state, v.detach())
+        dmd_update_snapshots(state, v.detach(), state["history"])
+    state["step"] += 1
+    x = scheduler.step(v, t, x)
+```
 
-- **`+` (HiCache / scaled-Hermite):** the *published* polynomial velocity-forecast basis — conservative, reproduces the HiCache paper. Use it to deploy the established method.
-- **`++` (HiCache++ / DMD exponential):** our Dynamic-Mode-Decomposition basis — *the same near-lossless quality at wider skip intervals*, where the polynomial diverges. Use it when you push the cache interval for more speed.
-- **standalone / model-agnostic:** [`hicache-plus-plus`](https://github.com/Archerkattri/hicache-plus-plus) — the forecaster itself, to add DMD caching to *your own* diffusion/flow model.
-- **`fast-trellis2`** = the TaylorSeer baseline fork (the upstream "Fast" accel) — the v2 reference point, not a HiCache variant.
+If you already run TaylorSeer or HiCache, this is a *basis swap*, not a new pipeline: the
+compute/skip schedule, warm-up and API stay identical — only the per-skip forecast formula
+changes (`backend="dmd"`, or `backend="auto"` to let a holdout test pick the basis per window).
 
-> **This repo:** `hicache-plus-plus` — the **standalone HiCache++ forecaster** (DMD/Prony exponential velocity cache) + the Hermite baseline — model-agnostic; the per-model integrations are the sibling repos above.
+<div align="center">
+
+*DiT-XL/2 ImageNet FID-50k vs latency Pareto plot — in progress
+(`benchmarks/dit_imagenet/`); plot lands here.*
+<!-- TODO(pareto): <img src="assets/pareto_dit_imagenet.png" width="620"> -->
+
+> **Headline so far:** on Hunyuan3D-2.1, as the skip interval grows the polynomial (Hermite)
+> decays fast — 0.88 → 0.74 → 0.38 F-score at interval 3 / 5 / 6 — while the exponential holds:
+> 0.85 → 0.86 → 0.62 (baseline 0.91). **The exponential lead grows with the skip — +0.13 at i5,
+> +0.24 at i6.**
+
+</div>
+
+> **Name note.** *HiCache* here refers to the diffusion **feature-forecasting** method (Hermite
+> polynomial feature caching, [arXiv:2508.16984](https://arxiv.org/abs/2508.16984)), which
+> HiCache++ upgrades. It is **unrelated to SGLang / Mooncake's "HiCache"**, a hierarchical
+> **KV cache** for LLM serving. Likewise, in this repo "DMD" always abbreviates **Dynamic Mode
+> Decomposition (Prony)** — classical spectral estimation — and never Distribution Matching
+> Distillation.
 
 ---
 
@@ -51,7 +75,7 @@ trajectory is the solution of a near-linear feature-ODE whose **exact** solution
 sum of (damped/oscillatory) **exponentials** — not polynomials. Polynomials diverge under
 extrapolation, which is exactly why every polynomial cache caps out at a modest skip.
 
-**HiCache++** forecasts with **Dynamic Mode Decomposition** (Schmid 2010) — the
+**HiCache++** forecasts with **Dynamic Mode Decomposition (Prony)** — DMD (Schmid 2010) is the
 SVD-regularised generalisation of **Prony's method** (1795): identify the linear propagator
 `A` from raw velocity snapshots (`F_{t+1} ≈ A F_t`), eigendecompose it once, and predict any
 (fractional) horizon `k` by eigenvalue powers:
@@ -63,18 +87,14 @@ F_{t+k} ≈ Φ (λ**k ⊙ b),     b = Φ⁺ F_t
 It is **exact on exponential trajectories** (the solution class) — the property polynomials
 lack — so it holds quality at skip intervals where Hermite/Taylor drift.
 
-> **Headline:** on Hunyuan3D-2.1, as the skip interval grows the polynomial (Hermite) decays
-> fast — 0.88 → 0.74 → 0.38 at interval 3 / 5 / 6 — while the exponential (DMD) holds: 0.85 →
-> 0.86 → 0.62 (baseline 0.91). **DMD's lead grows with the skip — +0.13 at i5, +0.24 at i6** —
-> the exponential basis is what extends the lossless skip range.
-
 ---
 
 ## How it compares
 
 Every modern feature cache skips the network on most steps and *forecasts* the velocity;
 they differ in the **basis** used to extrapolate. The basis is what sets the skip ceiling,
-because a diffusion feature trajectory is (locally) a sum of exponentials, not a polynomial:
+because a diffusion feature trajectory is (locally) a sum of exponentials, not a polynomial.
+HiCache++'s basis is the Dynamic Mode Decomposition (Prony) exponential:
 
 | Method | Forecast basis | Exact on the feature-ODE class | Extrapolation | Max lossless skip\* |
 |---|---|:--:|:--:|:--:|
@@ -86,8 +106,8 @@ because a diffusion feature trajectory is (locally) a sum of exponentials, not a
 <sub>\*measured on Hunyuan3D-2.1 / SAM3D-slat (see Results). A polynomial basis is only a
 local truncation of the exponential, so it is accurate for a tiny skip and diverges as the
 horizon grows; the exponential basis *is* the exact solution class, so it stays lossless
-further out — and DMD admits *fractional* horizons, so it forecasts sub-steps between
-compute steps exactly.</sub>
+further out — and the exponential forecaster admits *fractional* horizons, so it forecasts
+sub-steps between compute steps exactly.</sub>
 
 ---
 
@@ -100,8 +120,8 @@ of exponentials with poles `μ_j` (damped if `Re μ_j < 0`, oscillatory if `Im �
 
 - **Polynomial basis** (Taylor monomials, Hermite): a *local* Taylor truncation of that
   exponential. Accurate for a tiny skip, **diverges** as the horizon grows → modest skip cap.
-- **Exponential basis** (DMD / Prony): the *exact* function class. Fit the poles `λ_j = e^{μ_j Δ}`
-  from snapshots and extrapolate with bounded, correct asymptotics.
+- **Exponential basis** — Dynamic Mode Decomposition (Prony): the *exact* function class. Fit
+  the poles `λ_j = e^{μ_j Δ}` from snapshots and extrapolate with bounded, correct asymptotics.
 
 **The ≥4-snapshot floor.** A *real-valued* trajectory spends **two** real degrees of freedom
 on every **complex** pole (a conjugate pair `r e^{±iω}` → `r^t cos ωt, r^t sin ωt`). So even a
@@ -114,7 +134,8 @@ across a non-uniform window) HiCache++ falls back to the Hermite forecast for wa
 ## Results (A/B, geometry-preserving)
 
 All accelerators are *training-free and geometry-preserving*; the right A/B is **how far the
-output drifts from the uncached/baseline geometry vs how much faster it runs**.
+output drifts from the uncached/baseline geometry vs how much faster it runs**. "DMD" below
+is the HiCache++ Dynamic Mode Decomposition (Prony) exponential basis.
 
 ### Mechanism — controlled, no model
 
@@ -128,9 +149,15 @@ feature-ODE class — three forecast bases, rel. L2 error (↓):
 | **HiCache++ (exponential)** | **4.7e-9** | **1.4e-8** | **5.3e-8** | **1.2e-7** | **2.2e-7** |
 
 The exponential basis is **exact** (~1e-8, flat in `H`); the polynomial **diverges**, and the
-rational (Padé / FoCa) improves on it but still diverges — 6-to-9 orders of magnitude behind DMD,
-and under noise the rational basis turns fragile (Froissart poles). That gap *is* the skip ceiling.
-Reproduce: `python benchmarks/forecast_microbench.py`.
+rational (Padé / FoCa) improves on it but still diverges — 6-to-9 orders of magnitude behind the
+exponential, and under noise the rational basis turns fragile (Froissart poles). That gap *is*
+the skip ceiling. Reproduce: `python benchmarks/forecast_microbench.py`.
+
+### DiT-XL/2 ImageNet — FID-50k / IS vs latency
+
+*In progress* — the class-conditional ImageNet-256 sweep (FID-50k + Inception Score across
+intervals, Hermite vs exponential) is running in [`benchmarks/dit_imagenet/`](benchmarks/dit_imagenet/);
+the table and Pareto plot land here.
 
 ### Hunyuan3D-2.1 (flat DiT velocities) — Toys4K F-score@0.05
 
@@ -145,8 +172,9 @@ otherwise agree to ±0.01). Speedup is solo / uncontended.
 | **i5** | 0.735 | **0.860** | 1.79× |
 | i6 | 0.375 | **0.616** | ~2.0× |
 
-DMD degrades *gracefully* where Hermite collapses, and its lead grows with the interval. On the
-**deployed Hunyuan3D-2-mini**, DMD is **exactly lossless at i5** (0.794 = baseline 0.794).
+The exponential basis degrades *gracefully* where Hermite collapses, and its lead grows with the
+interval. On the **deployed Hunyuan3D-2-mini**, it is **exactly lossless at i5** (0.794 =
+baseline 0.794).
 
 ### SAM3D (PyTree velocities, slat FlowMatching) — real weights, F1 vs baseline
 
@@ -157,15 +185,13 @@ DMD degrades *gracefully* where Hermite collapses, and its lead grows with the i
 | DMD i5 | 1.47× | 0.013 | **1.000** |
 | **DMD i6** | **1.56×** | 0.013 | **1.000** |
 
-Both are geometry-lossless (F1=1.000); **DMD stays lossless to interval-6**, where it gives the
-best speedup — past Hermite's lossless i3.
-
-### Fast-SAM3D (SS-stage TaylorSeer)
-Hermite ≈ Taylor (a wash): both run the same stride-3 schedule, so the basis swap doesn't
-change latency — TaylorSeer caching (the default) is what gives the ~3×, not the basis.
+Both are geometry-lossless (F1=1.000); **the exponential basis stays lossless to interval-6**,
+where it gives the best speedup — past Hermite's lossless i3.
 
 ### TRELLIS v1 (sparse-structure stage) — Toys4K F-score@0.05, n=31
-Swapping *only* the SS forecast basis Hermite→DMD in `faster-trellis` (same carved-hybrid schedule):
+
+Swapping *only* the SS forecast basis Hermite→exponential in `faster-trellis` (same
+carved-hybrid schedule):
 
 | variant | F@0.05 | speedup | vs vanilla |
 |---|---:|---:|---:|
@@ -173,41 +199,46 @@ Swapping *only* the SS forecast basis Hermite→DMD in `faster-trellis` (same ca
 | HiCache (Hermite) | 0.825 | 2.82× | −0.014 |
 | **HiCache++ (DMD)** | **0.829** | **2.76×** | **−0.010** |
 
-At the deployed ~interval-3 (2.8×), DMD is the most lossless accelerator (beats Hermite by +0.005
-at matched speed); the margin widens at higher intervals. The same holds on **TRELLIS.2-4B (v2)** —
-DMD ties Hermite at the deployed interval and pulls **+0.03–0.04 F-score ahead at intervals 3–4**
+At the deployed ~interval-3 (2.8×), the exponential basis is the most lossless accelerator
+(beats Hermite by +0.005 at matched speed); the margin widens at higher intervals. The same
+holds on **TRELLIS.2-4B (v2)** — it ties Hermite at the deployed interval and pulls
+**+0.03–0.04 F-score ahead at intervals 3–4**
 (see [`hermit-trellis2-plus-plus`](https://github.com/Archerkattri/hermit-trellis2-plus-plus#results)).
-*(The DiT-XL/2 ImageNet FID-vs-latency table is still in progress.)*
+
+Full tables: [`results/RESULTS.md`](results/RESULTS.md).
 
 ---
 
 ## Install / use
 
-```python
-import torch
-from hicache_pp import hicache_init, hicache_decide, hicache_update_derivatives, hicache_forecast
-from hicache_pp import dmd_update_snapshots, dmd_forecast_state   # the exponential forecaster
-
-# in your denoise loop (flat tensor velocities):
-state = hicache_init(num_steps=N, interval=5, first_enhance=4, backend="dmd", history=6)
-for i, t in enumerate(timesteps):
-    if hicache_decide(state) == "forecast":
-        v = dmd_forecast_state(state)            # skip the network — forecast the velocity
-        state["step"] += 1
-    else:
-        v = model(x, t, ...)                     # the expensive forward
-        hicache_update_derivatives(state, v.detach())
-        dmd_update_snapshots(state, v.detach(), state["history"])
-        state["step"] += 1
-    x = scheduler.step(v, t, x)
+```bash
+pip install hicache-pp
 ```
 
-For **PyTree / structured** velocities (e.g. SAM3D), use `hicache_pp.tree` — the same API but
-tree-aware (`hicache_forecast_tree`, `dmd_forecast_tree`, plus tree Adaptive-CFG).
+The one-loop snippet at the top is the whole integration for **flat tensor** velocities
+(e.g. a DiT). For **PyTree / structured** velocities (e.g. SAM3D), use `hicache_pp.tree` —
+the same API but tree-aware (`hicache_forecast_tree`, `dmd_forecast_tree`, plus tree
+Adaptive-CFG). Backends:
 
-See [`integrations/`](integrations/) for the exact wiring into Hunyuan3D-2.1, Hunyuan3D-2-mini,
-SAM3D and Fast-SAM3D, [`benchmarks/`](benchmarks/) for the controlled forecast microbenchmark,
-and [`results/`](results/) for the full tables.
+- `backend="hermite"` — the published HiCache scaled-Hermite polynomial (clean reimplementation).
+- `backend="dmd"` — the HiCache++ Dynamic Mode Decomposition (Prony) exponential basis.
+- `backend="auto"` — holdout selection: per compute step, backcast the newest held-out
+  snapshot with both bases and serve whichever demonstrably wins on the data at hand.
+
+See [`integrations/`](integrations/) for the exact wiring into Hunyuan3D-2.1,
+Hunyuan3D-2-mini, SAM3D and Fast-SAM3D, and
+[`integrations/pr_drafts/`](integrations/pr_drafts/) for prepared patches that add this
+exponential basis to **cache-dit**, **Hugging Face diffusers** (`TaylorSeerCacheConfig`)
+and **Cache4Diffusion** in each project's native conventions.
+
+### Tuning notes
+
+- **Hermite**: lossless up to a modest interval (Hunyuan-2.1: i3/order-2). Higher order does
+  *not* rescue bigger intervals — the polynomial ceiling.
+- **Exponential**: push the interval further (i5–i6) for more skip while staying lossless.
+  `history` is the snapshot window (5–6); needs ≥4 *uniformly-spaced* snapshots before it
+  engages (Hermite covers warm-up automatically).
+- `first_enhance` always computes the first few steps (high curvature); keep it ≥ 3.
 
 ---
 
@@ -215,10 +246,41 @@ and [`results/`](results/) for the full tables.
 
 ```bash
 python -m hicache_pp.hermite     # Hermite basis + schedule (CPU, no GPU/model)
-python -m hicache_pp.dmd         # DMD exact-on-exponential + ≥4-snapshot floor
-python -m hicache_pp.tree        # tree-aware Hermite + DMD + Adaptive-CFG
+python -m hicache_pp.dmd         # exponential basis exact-on-exponential + ≥4-snapshot floor
+python -m hicache_pp.tree        # tree-aware Hermite + exponential + Adaptive-CFG
 python tests/run_tests.py        # all of the above
 ```
+
+---
+
+## 3D generator integrations (sibling repos)
+
+The forecaster in this repo is model-agnostic; it has also been wired natively into a family
+of 3D-generator forks. These are **complementary accelerators, not competing solutions** —
+each speeds up a *different* base generator, and the `+` / `++` suffix is a **method choice**
+(`+` = HiCache Hermite polynomial, `++` = HiCache++ Dynamic Mode Decomposition (Prony)
+exponential), not a rival product. Pick by **(1) which base model you run**, then **(2) which
+forecast basis you want**:
+
+| base generator | `+` = HiCache (Hermite) | `++` = HiCache++ (DMD) |
+|---|---|---|
+| Hunyuan3D-2.1 | `hunyuan2.1-plus` | `hunyuan2.1-plus-plus` |
+| Hunyuan3D-2 mini | `hunyuan2-plus` | `hunyuan2-plus-plus` |
+| SAM 3D Objects | `sam3d-plus` | `sam3d-plus-plus` |
+| Fast-SAM3D | `fastsam3d-plus` | `fastsam3d-plus-plus` |
+| DiT-XL/2 (ImageNet) | `dit-plus` | `dit-plus-plus` |
+| TRELLIS (v1) | `faster-trellis` | `faster-trellis-plus-plus` |
+| TRELLIS.2-4B (v2) | `hermit-trellis2` | `hermit-trellis2-plus-plus` |
+
+- **`+` (HiCache / scaled-Hermite):** the *published* polynomial velocity-forecast basis —
+  conservative, reproduces the HiCache paper. Use it to deploy the established method.
+- **`++` (HiCache++ / exponential):** our Dynamic Mode Decomposition (Prony) basis — *the same
+  near-lossless quality at wider skip intervals*, where the polynomial diverges. Use it when
+  you push the cache interval for more speed.
+- **standalone / model-agnostic:** [`hicache-plus-plus`](https://github.com/Archerkattri/hicache-plus-plus)
+  (this repo) — the forecaster itself, to add exponential caching to *your own* diffusion/flow model.
+- **`fast-trellis2`** = the TaylorSeer baseline fork (the upstream "Fast" accel) — the v2
+  reference point, not a HiCache variant.
 
 ---
 
@@ -227,9 +289,10 @@ python tests/run_tests.py        # all of the above
 - **TaylorSeer** — feature caching with a monomial (Taylor) basis.
 - **HiCache** (arXiv:2508.16984) — the scaled-Hermite polynomial upgrade. `hicache_pp.hermite`
   is a clean reimplementation.
-- **HiCache++ (this work)** — the **DMD/Prony exponential** forecaster (`hicache_pp.dmd`). DMD
-  (Schmid 2010) / Prony (1795) / Matrix-Pencil (Hua–Sarkar 1990) are classical spectral
-  estimation; their application to **diffusion feature caching** is, to our knowledge, new.
+- **HiCache++ (this work)** — the **Dynamic Mode Decomposition (Prony) exponential** forecaster
+  (`hicache_pp.dmd`). DMD (Schmid 2010) / Prony (1795) / Matrix-Pencil (Hua–Sarkar 1990) are
+  classical spectral estimation; their application to **diffusion feature caching** is, to our
+  knowledge, new.
 - **Adaptive-CFG** (Adaptive Guidance, arXiv:2312.12487) — composable uncond-skip, included in
   the tree module.
 

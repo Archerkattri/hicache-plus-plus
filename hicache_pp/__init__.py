@@ -26,12 +26,12 @@ from .hermite import (
     hicache_init, hicache_decide, hicache_update_derivatives, hicache_forecast,
     physicists_hermite, scaled_hermite,
 )
-from .dmd import dmd_forecast, dmd_update_snapshots, dmd_forecast_state
+from .dmd import dmd_forecast, dmd_update_snapshots, dmd_forecast_state, auto_forecast_state
 
 __all__ = [
     "hermite", "dmd", "tree",
     "hicache_init", "hicache_decide", "hicache_update_derivatives", "hicache_forecast",
     "physicists_hermite", "scaled_hermite",
-    "dmd_forecast", "dmd_update_snapshots", "dmd_forecast_state",
+    "dmd_forecast", "dmd_update_snapshots", "dmd_forecast_state", "auto_forecast_state",
 ]
 __version__ = "0.1.0"

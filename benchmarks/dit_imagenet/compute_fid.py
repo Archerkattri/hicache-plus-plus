@@ -24,10 +24,16 @@ def frechet(mu1, s1, mu2, s2):
 
 def order_key(cell):
     if cell == "baseline":
-        return (0, 0)
-    m, _, i = cell.rpartition("_i")
-    rank = {"taylor": 1, "hermite": 2, "dmd": 3}.get(m, 9)
-    return (rank, int(i))
+        return (0, 0, 0)
+    m, _, rest = cell.rpartition("_i")
+    rank = {"taylor": 1, "hermite": 2, "dmd": 3, "auto": 4}.get(m, 9)
+    # rest may be "4" or "4_horizon"/"4_fix"; split the interval from any suffix
+    interval_str, _, suffix = rest.partition("_")
+    try:
+        interval = int(interval_str)
+    except ValueError:
+        interval = 99
+    return (rank, interval, 1 if suffix else 0)
 
 
 def main():

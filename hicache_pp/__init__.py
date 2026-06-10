@@ -12,8 +12,12 @@ velocity from cached anchors at the recent *compute* steps:
     class is a sum of (damped/oscillatory) exponentials — *not* polynomials. DMD (Schmid
     2010), the SVD-regularised generalisation of Prony's method (1795), identifies the
     linear propagator from raw velocity snapshots and advances it by eigenvalue powers,
-    so it is *exact* on that class where the polynomial drifts. This lets it stay lossless
-    at larger skip intervals than the polynomial — the failure mode that caps HiCache.
+    so it is *exact* on that class where the polynomial drifts.
+
+The benchmark verdict is family-conditional (see README, "The domain split"): the
+exponential basis wins on flow-matching 3D generators and LOSES on DiT-class denoising,
+where the corrected polynomial is near-lossless. ``backend="auto"`` (holdout selection)
+exists for exactly that reason; on DiT-class real features prefer the polynomial outright.
 
 Flat-tensor velocities (e.g. Hunyuan3D DiT):     use ``hermite`` + ``dmd``.
 PyTree / structured velocities (e.g. SAM3D):      use ``tree`` (tree-aware Hermite + DMD
@@ -34,4 +38,8 @@ __all__ = [
     "physicists_hermite", "scaled_hermite",
     "dmd_forecast", "dmd_update_snapshots", "dmd_forecast_state", "auto_forecast_state",
 ]
-__version__ = "1.1.0"
+# Synced literal; pyproject.toml is the source of truth and tests/test_version.py
+# asserts the two match. (importlib.metadata is NOT used on purpose: when this package
+# is imported from a source tree on sys.path while an older wheel is also installed,
+# the metadata lookup reports the wheel's version, not the code actually imported.)
+__version__ = "1.2.0"

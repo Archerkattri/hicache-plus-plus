@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hicache-pp"
-version = "1.2.0.dev0"
+version = "1.2.0"
 description = "Drop-in TaylorSeer/HiCache basis upgrade: training-free diffusion acceleration via Dynamic Mode Decomposition (Prony) exponential feature forecasting"
 readme = "README.md"
 requires-python = ">=3.9"

@@ -127,10 +127,11 @@ class CellCheckpoint:
 class CachedCFG:
     """Wraps ``model.forward_with_cfg`` with a HiCache-style compute/forecast schedule."""
 
-    def __init__(self, model, method, interval, num_steps, first_enhance, sigma, order, history):
+    def __init__(self, model, method, interval, num_steps, first_enhance, sigma, order, history,
+                 holdout="1step"):
         self.model, self.method = model, method
         self.p = dict(interval=interval, num_steps=num_steps, first_enhance=first_enhance,
-                      sigma=sigma, order=order, history=history)
+                      sigma=sigma, order=order, history=history, holdout=holdout)
         self.reset()
 
     def reset(self):
@@ -138,7 +139,8 @@ class CachedCFG:
         self.state = hicache_init(num_steps=self.p["num_steps"], interval=max(1, self.p["interval"]),
                                   max_order=self.p["order"], first_enhance=self.p["first_enhance"],
                                   sigma=self.p["sigma"],
-                                  backend={"dmd": "dmd", "auto": "auto"}.get(self.method, "hermite"))
+                                  backend={"dmd": "dmd", "auto": "auto"}.get(self.method, "hermite"),
+                                  holdout=self.p["holdout"])
         self.state["history"] = self.p["history"]
         self.state["step"] = 0
         self.compute_calls = 0
@@ -180,6 +182,8 @@ def main():
     ap.add_argument("--sigma", type=float, default=0.5)
     ap.add_argument("--history", type=int, default=6)
     ap.add_argument("--first-enhance", type=int, default=4)
+    ap.add_argument("--holdout", choices=["1step", "horizon"], default="1step",
+                    help="auto-backend selection test (only affects --method auto)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--gpu", type=int, default=0)
     ap.add_argument("--ckpt", default=os.path.join(REPO, "..", "..", "data", "weights", "DiT",
@@ -192,6 +196,8 @@ def main():
     torch.set_grad_enabled(False)
     dev = f"cuda:{args.gpu}"
     cell = f"{args.method}_i{args.interval}" if args.method != "none" else "baseline"
+    if args.method == "auto" and args.holdout != "1step":
+        cell += f"_{args.holdout}"
     os.makedirs(args.out, exist_ok=True)
     out_npz = os.path.join(args.out, f"{cell}.npz")
     if os.path.exists(out_npz):
@@ -209,11 +215,12 @@ def main():
     inception = InceptionV3([InceptionV3.BLOCK_INDEX_BY_DIM[2048]]).to(dev).eval()
     diffusion = create_diffusion(str(args.steps))
     cached = CachedCFG(model, args.method, args.interval, args.steps,
-                       args.first_enhance, args.sigma, args.order, args.history)
+                       args.first_enhance, args.sigma, args.order, args.history,
+                       holdout=args.holdout)
 
     fingerprint = (f"{args.method}|i{args.interval}|n{args.n}|b{args.batch}|s{args.steps}|"
                    f"cfg{args.cfg_scale}|o{args.order}|sg{args.sigma}|h{args.history}|"
-                   f"fe{args.first_enhance}|seed{args.seed}")
+                   f"fe{args.first_enhance}|seed{args.seed}|ho{args.holdout}")
     ckpt = CellCheckpoint(out_npz, fingerprint)
     done0, _ = ckpt.resume()
 

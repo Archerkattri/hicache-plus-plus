@@ -233,6 +233,10 @@ def run(noise=0.0, seeds=20, horizons=(1, 2, 3, 4, 6, 8), order=3, history=8, n_
                 traj = make_traj(T_total, n_modes=n_modes, seed=seed)
             snaps = [traj[s] for s in range(history)]                 # cached window t=0..history-1
             if noise:
+                # seed the global RNG per (horizon, seed) cell: randn_like draws from
+                # the GLOBAL generator, which torch seeds nondeterministically per
+                # process, so without this the noise tables vary run to run
+                torch.manual_seed(98765 + 1000 * Hz + seed)
                 snaps = [F + noise * F.norm() / F.numel() ** 0.5 * torch.randn_like(F)
                          for F in snaps]
             truth = traj[(history - 1) + Hz]

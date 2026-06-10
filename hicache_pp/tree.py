@@ -165,18 +165,20 @@ def hicache_forecast_tree(state: Dict[str, Any]) -> Any:
 # unflattened back. Exact on the exponential class where the Hermite polynomial #
 # drifts (the failure mode that caps HiCache at a modest skip interval).        #
 # --------------------------------------------------------------------------- #
-def _dmd_forecast_flat(snapshots, k, rank=0, ridge=1e-8):
-    """DMD forecast of a flat vector ``k`` (fractional) steps past the newest of a
-    list of >=4 equal-length 1-D snapshot vectors. Falls back to last-value reuse."""
+def _dmd_fit_flat(snapshots, rank=0, ridge=1e-8):
+    """Fit the DMD eigendecomposition once for a window of >=4 equal-length 1-D
+    snapshot vectors. Returns ``(Phi, evals, b, dtype)`` or ``None`` on a
+    degenerate fit. Horizon-independent, so :func:`dmd_forecast_tree` caches it
+    per compute window and reuses it for every skip-step forecast."""
     if len(snapshots) < 4:
-        return snapshots[-1].clone()
+        return None
     dt = snapshots[-1].dtype
     V = torch.stack(snapshots, dim=1).to(torch.float64)          # [d, n]
     X, Xp = V[:, :-1], V[:, 1:]
     try:
         U, S, Vh = torch.linalg.svd(X, full_matrices=False)
     except Exception:  # noqa: BLE001 — numerically degenerate fit: fall back to last-value reuse
-        return snapshots[-1].clone()
+        return None
     if rank <= 0:
         rank = int((S > S[0] * 1e-4).sum().clamp(min=1).item())
     rank = max(1, min(rank, S.numel()))
@@ -188,11 +190,31 @@ def _dmd_forecast_flat(snapshots, k, rank=0, ridge=1e-8):
         Phi = ((Xp @ Vr).to(torch.complex128) * Sinv.unsqueeze(0)) @ W
         b = torch.linalg.lstsq(Phi, V[:, -1].to(torch.complex128).unsqueeze(1)).solution.squeeze(1)
     except Exception:  # noqa: BLE001 — numerically degenerate fit: fall back to last-value reuse
-        return snapshots[-1].clone()
+        return None
+    return (Phi, evals, b, dt)
+
+
+def _dmd_eval_flat(fit, k):
+    """Evaluate a cached :func:`_dmd_fit_flat` at (fractional) horizon ``k``.
+    Returns ``None`` on a non-finite prediction (caller falls back to reuse)."""
+    Phi, evals, b, dt = fit
     pred = (Phi @ (evals.pow(float(k)) * b)).real
     if not torch.isfinite(pred).all():
-        return snapshots[-1].clone()
+        return None
     return pred.to(dt)
+
+
+def _dmd_forecast_flat(snapshots, k, rank=0, ridge=1e-8):
+    """DMD forecast of a flat vector ``k`` (fractional) steps past the newest of a
+    list of >=4 equal-length 1-D snapshot vectors. Falls back to last-value reuse.
+    (Stateless fit-per-call wrapper; the stateful tree path caches the fit.)"""
+    fit = _dmd_fit_flat(snapshots, rank=rank, ridge=ridge)
+    if fit is None:
+        return snapshots[-1].clone()
+    pred = _dmd_eval_flat(fit, k)
+    if pred is None:
+        return snapshots[-1].clone()
+    return pred
 
 
 def dmd_update_snapshots_tree(state: Dict[str, Any], velocity_tree: Any, history: int = 5) -> None:
@@ -211,7 +233,13 @@ def dmd_forecast_tree(state: Dict[str, Any]) -> Any:
     uniformly-spaced tail (>=4 snapshots) to vectors, runs DMD with a fractional horizon
     ``lambda**(k/spacing)``, and unflattens to the tree. Floor is 4 snapshots (3 pairs):
     a real trajectory spends two real DOF per COMPLEX pole, so even one oscillatory mode
-    needs rank 3. Below that / on a non-uniform window, falls back to Hermite (warm-up)."""
+    needs rank 3. Below that / on a non-uniform window, falls back to Hermite (warm-up).
+
+    The eigendecomposition (and the tree flattening that feeds it) is CACHED per
+    compute window: the snapshot window cannot change between two compute steps, so
+    refitting on every skip step (the pre-1.2 behavior) was pure waste. The cache is
+    keyed by (newest compute step, window length, spacing) and recomputed exactly
+    when a new snapshot arrives."""
     snaps = state.get("dmd_snapshots", [])
     if len(snaps) >= 4:
         steps = [s for s, _ in snaps]
@@ -222,13 +250,20 @@ def dmd_forecast_tree(state: Dict[str, Any]) -> Any:
             while j - 1 >= 0 and steps[j] - steps[j - 1] == spacing:
                 tail.append(snaps[j - 1]); j -= 1
             if len(tail) >= 4:
-                trees = [v for _, v in reversed(tail)]                # oldest..newest
-                flat = [_pytree.tree_flatten(t) for t in trees]       # [(leaves, spec), ...]
-                leaves_new, spec = flat[-1]
-                shapes = [l.shape for l in leaves_new]
-                vecs = [torch.cat([l.reshape(-1) for l in lv]) for lv, _ in flat]
+                fit_key = (steps[-1], len(tail), spacing)
+                if state.get("_dmd_tree_fit_key") != fit_key:
+                    trees = [v for _, v in reversed(tail)]            # oldest..newest
+                    flat = [_pytree.tree_flatten(t) for t in trees]   # [(leaves, spec), ...]
+                    leaves_new, spec = flat[-1]
+                    shapes = [l.shape for l in leaves_new]
+                    vecs = [torch.cat([l.reshape(-1) for l in lv]) for lv, _ in flat]
+                    state["_dmd_tree_fit"] = (_dmd_fit_flat(vecs), spec, shapes, vecs[-1])
+                    state["_dmd_tree_fit_key"] = fit_key
+                fit, spec, shapes, newest_vec = state["_dmd_tree_fit"]
                 kf = (state["step"] - steps[-1]) / spacing
-                pred = _dmd_forecast_flat(vecs, kf)
+                pred = _dmd_eval_flat(fit, kf) if fit is not None else None
+                if pred is None:
+                    pred = newest_vec.clone()
                 out, i = [], 0
                 for sh in shapes:
                     n = 1
@@ -390,6 +425,34 @@ if __name__ == "__main__":
               for l1, l2 in zip(_pytree.tree_leaves(dmd_forecast_tree(st_dmd)),
                                 _pytree.tree_leaves(vtree(11))))
     check(f"DMD tree forecast exact on exponential traj (rel {rel:.2e} < 1e-4)", rel < 1e-4)
+
+    # 8b) eigencache: forecasts across several skip steps of ONE window are
+    #     bit-identical to the stateless fit-per-call path, and a new snapshot
+    #     invalidates the cache.
+    st_cache = {"step": 11, "history": 5,
+                "dmd_snapshots": [(1, vtree(1)), (4, vtree(4)), (7, vtree(7)), (10, vtree(10))]}
+    vecs_ref = [torch.cat([l.reshape(-1) for l in _pytree.tree_leaves(vtree(s))])
+                for s in (1, 4, 7, 10)]
+    max_dev = 0.0
+    for stp in (11, 12, 13):
+        st_cache["step"] = stp
+        got = torch.cat([l.reshape(-1) for l in _pytree.tree_leaves(dmd_forecast_tree(st_cache))])
+        ref = _dmd_forecast_flat(vecs_ref, (stp - 10) / 3.0)
+        max_dev = max(max_dev, float((got - ref).abs().max()))
+    # 1e-12 tolerance, not bit-equality: CPU LAPACK svd/eig is run-to-run
+    # nondeterministic at ~1e-16 even for identical stateless calls.
+    check(f"tree eigencache matches uncached path (3 horizons, max dev {max_dev:.1e} < 1e-12)",
+          max_dev < 1e-12)
+    check("tree eigencache fitted exactly once per window",
+          st_cache.get("_dmd_tree_fit_key") == (10, 4, 3))
+    key_b = st_cache["_dmd_tree_fit_key"]
+    st_cache["dmd_snapshots"].append((13, vtree(13)))
+    st_cache["step"] = 14
+    got2 = torch.cat([l.reshape(-1) for l in _pytree.tree_leaves(dmd_forecast_tree(st_cache))])
+    ref2 = _dmd_forecast_flat(vecs_ref + [torch.cat([l.reshape(-1) for l in
+                                                     _pytree.tree_leaves(vtree(13))])], 1 / 3.0)
+    check("tree eigencache invalidated by a new snapshot (refit matches uncached)",
+          st_cache["_dmd_tree_fit_key"] != key_b and float((got2 - ref2).abs().max()) < 1e-12)
 
     # 9) DMD below the 4-snapshot floor -> Hermite fallback (== constant here, no crash).
     st_fb = hicache_init(num_steps=8, interval=3, max_order=1, first_enhance=0, end_enhance=8,

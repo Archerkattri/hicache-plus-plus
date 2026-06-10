@@ -31,24 +31,23 @@ import math
 import torch
 
 
-def dmd_forecast(snapshots, k: int, rank: int = 0, ridge: float = 1e-8) -> torch.Tensor:
-    """Forecast the feature ``k`` steps past the newest snapshot via DMD.
+def dmd_fit(snapshots, rank: int = 0, ridge: float = 1e-8):
+    """Fit the DMD eigendecomposition once for a snapshot window.
 
-    snapshots : list of >=3 tensors (same shape), OLDEST..NEWEST, the cached
-                (CFG-combined) velocities at the recent compute steps.
-    k         : horizon (number of steps past the newest snapshot).
-    Returns a tensor of the snapshot shape. Falls back to last-value reuse if the
-    history is too short or the fit is degenerate.
-    """
-    shp, dt = snapshots[-1].shape, snapshots[-1].dtype
+    Returns ``(Phi, evals, b, shape, dtype)`` -- everything a forecast at ANY
+    horizon needs -- or ``None`` on a degenerate fit (caller falls back to
+    last-value reuse). The fit depends only on the snapshot window, not on the
+    horizon, so between two compute steps it can be computed once and reused by
+    every skip-step forecast (see :func:`dmd_forecast_state`)."""
     if len(snapshots) < 3:
-        return snapshots[-1].clone()
+        return None
+    shp, dt = snapshots[-1].shape, snapshots[-1].dtype
     V = torch.stack([s.reshape(-1) for s in snapshots], dim=1).to(torch.float64)  # [d, n+1]
     X, Xp = V[:, :-1], V[:, 1:]                                                   # [d, n]
     try:
         U, S, Vh = torch.linalg.svd(X, full_matrices=False)                       # U[d,n] S[n] Vh[n,n]
     except Exception:  # noqa: BLE001 — numerically degenerate fit: fall back to last-value reuse
-        return snapshots[-1].clone()
+        return None
     if rank <= 0:
         rank = int((S > S[0] * 1e-4).sum().clamp(min=1).item())
     rank = max(1, min(rank, S.numel()))
@@ -60,11 +59,38 @@ def dmd_forecast(snapshots, k: int, rank: int = 0, ridge: float = 1e-8) -> torch
         Phi = ((Xp @ Vr).to(torch.complex128) * Sinv.unsqueeze(0)) @ W           # DMD modes [d, r]
         b = torch.linalg.lstsq(Phi, V[:, -1].to(torch.complex128).unsqueeze(1)).solution.squeeze(1)
     except Exception:  # noqa: BLE001 — numerically degenerate fit: fall back to last-value reuse
-        return snapshots[-1].clone()
+        return None
+    return (Phi, evals, b, shp, dt)
+
+
+def dmd_eval(fit, k):
+    """Evaluate a cached :func:`dmd_fit` at (fractional, signed) horizon ``k``:
+    ``Phi @ (lambda**k * b)``. Returns ``None`` if the prediction is non-finite
+    (caller falls back to last-value reuse)."""
+    Phi, evals, b, shp, dt = fit
     pred = (Phi @ (evals.pow(float(k)) * b)).real                                # [d]
     if not torch.isfinite(pred).all():
-        return snapshots[-1].clone()
+        return None
     return pred.to(dt).reshape(shp)
+
+
+def dmd_forecast(snapshots, k: int, rank: int = 0, ridge: float = 1e-8) -> torch.Tensor:
+    """Forecast the feature ``k`` steps past the newest snapshot via DMD.
+
+    snapshots : list of >=3 tensors (same shape), OLDEST..NEWEST, the cached
+                (CFG-combined) velocities at the recent compute steps.
+    k         : horizon (number of steps past the newest snapshot).
+    Returns a tensor of the snapshot shape. Falls back to last-value reuse if the
+    history is too short or the fit is degenerate. (Stateless: fits on every call;
+    the stateful paths cache the fit per compute window instead.)
+    """
+    fit = dmd_fit(snapshots, rank=rank, ridge=ridge)
+    if fit is None:
+        return snapshots[-1].clone()
+    pred = dmd_eval(fit, k)
+    if pred is None:
+        return snapshots[-1].clone()
+    return pred
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +132,14 @@ def dmd_forecast_state(state) -> torch.Tensor:
     spends two real degrees of freedom on every *complex* pole (a conjugate pair
     ``r e^{+-i w}`` -> ``r^t cos(wt), r^t sin(wt)``), so even a single oscillatory
     mode needs rank 3 to identify, which needs 3 snapshot-pairs. With only 2 pairs
-    the fit aliases (empirically ~2e-1 vs ~5e-9 at 3 pairs)."""
+    the fit aliases (empirically ~2e-1 vs ~5e-9 at 3 pairs).
+
+    The eigendecomposition ``(Phi, lambda, b)`` is CACHED per compute window: the
+    fit inputs cannot change between two compute steps, so refitting on every
+    skip step (the pre-1.2 behavior) was pure waste. The cache is keyed by
+    (newest compute step, window length, spacing) and recomputed exactly when a
+    new snapshot arrives; the per-skip cost drops from one SVD+eig+lstsq to one
+    ``Phi @ (lambda**k * b)``."""
     snaps = state.get("dmd_snapshots", [])
     if len(snaps) >= 4:
         steps = [s for s, _ in snaps]
@@ -120,8 +153,14 @@ def dmd_forecast_state(state) -> torch.Tensor:
                 j -= 1
             if len(tail) >= 4:
                 vels = [v for _, v in reversed(tail)]            # oldest..newest
+                fit_key = (steps[-1], len(vels), spacing)
+                if state.get("_dmd_fit_key") != fit_key:
+                    state["_dmd_fit"] = dmd_fit(vels)
+                    state["_dmd_fit_key"] = fit_key
+                fit = state["_dmd_fit"]
                 k = (state["step"] - steps[-1]) / spacing        # fractional horizon
-                return dmd_forecast(vels, k)
+                pred = dmd_eval(fit, k) if fit is not None else None
+                return vels[-1].clone() if pred is None else pred
     try:                                                         # lazy: keep standalone-testable
         from .hermite import hicache_forecast
     except ImportError:
@@ -259,8 +298,16 @@ def auto_forecast_state(state) -> torch.Tensor:
                     state["_auto_choice"] = choice
                     state["_auto_choice_key"] = cache_key
                 if choice == "dmd":
+                    # serve through the same per-window eigendecomposition cache
+                    # as dmd_forecast_state (refit only when a snapshot arrives)
+                    fit_key = (steps[-1], len(vels), spacing)
+                    if state.get("_dmd_fit_key") != fit_key:
+                        state["_dmd_fit"] = dmd_fit(vels)
+                        state["_dmd_fit_key"] = fit_key
+                    fit = state["_dmd_fit"]
                     k = (state["step"] - steps[-1]) / spacing
-                    return dmd_forecast(vels, k)
+                    pred = dmd_eval(fit, k) if fit is not None else None
+                    return vels[-1].clone() if pred is None else pred
                 # fall through to the Hermite forecast below
     try:                                                         # lazy: keep standalone-testable
         from .hermite import hicache_forecast
@@ -413,6 +460,43 @@ if __name__ == "__main__":
     check("horizon holdout h<4 (prefix path) returns a finite forecast and a choice",
           torch.isfinite(out_h2).all().item()
           and st_h2.get("_auto_choice") in ("dmd", "hermite"))
+
+    # ------------------------------------------------------------------
+    # eigendecomposition cache: bit-identical to the uncached fit-per-call
+    # path across skip steps, scenarios, and cache invalidations
+    # ------------------------------------------------------------------
+    for name_c, snaps_c in (("exponential", traj[:6]), ("osc-trend", traj_mis[:6])):
+        st_c = {"step": 0, "history": 8,
+                "dmd_snapshots": [(i, v) for i, v in enumerate(snaps_c)]}
+        max_dev = 0.0
+        for k_skip in (1, 2, 3):                      # several forecasts, ONE window
+            st_c["step"] = 5 + k_skip
+            cached = dmd_forecast_state(st_c)
+            uncached = dmd_forecast(snaps_c, k_skip)  # stateless refit every call
+            max_dev = max(max_dev, float((cached - uncached).abs().max()))
+        # tolerance, not bit-equality: CPU LAPACK svd/eig is run-to-run
+        # nondeterministic at ~1e-16 even for two IDENTICAL stateless calls
+        # (measured 3e-16 on this stack); 1e-12 bounds the cache discrepancy.
+        check(f"eigencache matches uncached path ({name_c}, 3 horizons, "
+              f"max dev {max_dev:.1e} < 1e-12)", max_dev < 1e-12)
+        n_snaps = len(st_c["dmd_snapshots"])
+        check("eigencache fitted exactly once per window",
+              st_c.get("_dmd_fit_key") == (n_snaps - 1, n_snaps, 1))
+        # a new snapshot must invalidate the cache and change the fit
+        key_before = st_c["_dmd_fit_key"]
+        st_c["dmd_snapshots"].append((6, snaps_c[-1] * 1.5))
+        st_c["step"] = 7
+        nxt = dmd_forecast_state(st_c)
+        snaps_n = [v for _, v in st_c["dmd_snapshots"]]
+        check("new snapshot invalidates the eigencache (refit matches uncached)",
+              st_c["_dmd_fit_key"] != key_before
+              and float((nxt - dmd_forecast(snaps_n, 1)).abs().max()) < 1e-12)
+
+    # auto serve path goes through the same cache and stays identical
+    st_a = _drive(snaps_exp, 4, "horizon")            # picks dmd (checked above)
+    served = auto_forecast_state(st_a)
+    check("auto dmd serve via eigencache == uncached dmd_forecast (<1e-12)",
+          float((served - dmd_forecast(snaps_exp, 4)).abs().max()) < 1e-12)
 
     print("\nALL PASS" if ok else "\nSOME FAILED")
     raise SystemExit(0 if ok else 1)

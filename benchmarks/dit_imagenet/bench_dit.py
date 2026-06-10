@@ -50,6 +50,80 @@ def taylor_forecast(state):
     return out
 
 
+def atomic_savez(path, **arrays):
+    """np.savez through a temp file + os.replace: a kill mid-write can never leave
+    a truncated npz at the destination path."""
+    tmp = path + ".tmp.npz"                     # ends in .npz so np.savez appends nothing
+    np.savez(tmp, **arrays)
+    os.replace(tmp, path)
+
+
+class CellCheckpoint:
+    """Per-1k-image checkpointing of the FID stat accumulation, so a killed cell
+    resumes from the last checkpoint instead of restarting from image 0.
+
+    The partial state file ``<cell>.partial.npz`` (next to the final npz) holds the
+    raw Inception activations accumulated so far plus the latency counter and a run
+    fingerprint; it is written atomically every ``every`` images and removed when the
+    final npz lands. The final npz format is UNCHANGED (same keys as before this
+    class existed), and a resumed run produces bit-identical final stats to an
+    uninterrupted one (the caller must fast-forward its RNG past completed batches;
+    the per-step ancestral noise is already re-seeded per batch and needs nothing).
+    """
+
+    def __init__(self, out_npz, fingerprint, every=1000):
+        self.out_npz = out_npz
+        base = out_npz[:-4] if out_npz.endswith(".npz") else out_npz
+        self.partial_path = base + ".partial.npz"
+        self.fingerprint = str(fingerprint)
+        self.every = int(every)
+        self.feats = []                          # list of [b, 2048] activation arrays
+        self.done = 0                            # images fully accumulated
+        self.t_gen = 0.0                         # summed p_sample_loop wall-clock (s)
+        self._last_saved = 0
+
+    def resume(self):
+        """Load the partial state if present. Returns ``(done, t_gen)`` (0, 0.0 on a
+        fresh start). Refuses a partial written under different run parameters."""
+        if os.path.exists(self.partial_path):
+            with np.load(self.partial_path, allow_pickle=False) as z:
+                fp = str(z["fingerprint"])
+                if fp != self.fingerprint:
+                    raise RuntimeError(
+                        f"partial state {self.partial_path} was written by a different "
+                        f"run configuration ({fp!r} != {self.fingerprint!r}); delete it "
+                        f"or rerun with the original parameters")
+                self.feats = [np.array(z["act"])]
+                self.done = int(z["done"])
+                self.t_gen = float(z["t_gen"])
+            self._last_saved = self.done
+        return self.done, self.t_gen
+
+    def add(self, feats_batch, b, dt):
+        """Accumulate one batch (``b`` images, ``dt`` seconds of generation) and
+        checkpoint when a ``every``-image boundary is crossed."""
+        self.feats.append(feats_batch)
+        self.done += int(b)
+        self.t_gen += float(dt)
+        if self.done // self.every > self._last_saved // self.every:
+            self.save_partial()
+
+    def save_partial(self):
+        atomic_savez(self.partial_path, act=np.concatenate(self.feats, 0),
+                     done=self.done, t_gen=self.t_gen, fingerprint=self.fingerprint)
+        self._last_saved = self.done
+
+    def finalize(self, n, **meta):
+        """Compute (mu, sigma) over the first ``n`` activations, atomically write the
+        final npz (format unchanged) and remove the partial file."""
+        act = np.concatenate(self.feats, 0)[:n]
+        mu, sigma = act.mean(0), np.cov(act, rowvar=False)
+        atomic_savez(self.out_npz, mu=mu, sigma=sigma, n=n, **meta)
+        if os.path.exists(self.partial_path):
+            os.remove(self.partial_path)
+        return mu, sigma
+
+
 class CachedCFG:
     """Wraps ``model.forward_with_cfg`` with a HiCache-style compute/forecast schedule."""
 
@@ -137,9 +211,28 @@ def main():
     cached = CachedCFG(model, args.method, args.interval, args.steps,
                        args.first_enhance, args.sigma, args.order, args.history)
 
+    fingerprint = (f"{args.method}|i{args.interval}|n{args.n}|b{args.batch}|s{args.steps}|"
+                   f"cfg{args.cfg_scale}|o{args.order}|sg{args.sigma}|h{args.history}|"
+                   f"fe{args.first_enhance}|seed{args.seed}")
+    ckpt = CellCheckpoint(out_npz, fingerprint)
+    done0, _ = ckpt.resume()
+
     g = torch.Generator(device=dev).manual_seed(args.seed)
-    feats, done, t_gen = [], 0, 0.0
-    while done < args.n:
+    if done0:
+        print(f"[resume] {cell}: {done0}/{args.n} images from {ckpt.partial_path}", flush=True)
+        # Fast-forward the class/latent generator past the completed batches by
+        # replaying (and discarding) their draws — deterministic, so a resumed run
+        # is bit-identical to an uninterrupted one. The per-step ancestral noise is
+        # already re-seeded per batch (below) and needs no fast-forward.
+        d = 0
+        while d < done0:
+            b = min(args.batch, args.n - d)
+            torch.randint(0, 1000, (b,), generator=g, device=dev)
+            torch.randn(b, 4, 32, 32, generator=g, device=dev)
+            d += b
+
+    while ckpt.done < args.n:
+        done = ckpt.done
         b = min(args.batch, args.n - done)
         y = torch.randint(0, 1000, (b,), generator=g, device=dev)
         z = torch.randn(b, 4, 32, 32, generator=g, device=dev)
@@ -159,21 +252,33 @@ def main():
         s = diffusion.p_sample_loop(cached, z.shape, z, clip_denoised=False,
                                     model_kwargs=dict(y=y_in, cfg_scale=args.cfg_scale),
                                     progress=False, device=dev)
-        torch.cuda.synchronize(dev); t_gen += time.time() - t0
+        torch.cuda.synchronize(dev); dt = time.time() - t0
         s = s.chunk(2, 0)[0]
         img = vae.decode(s / 0.18215).sample                       # [-1,1]
         img = ((img + 1) * 0.5).clamp(0, 1)
-        feats.append(inception(img)[0].squeeze(-1).squeeze(-1).cpu().numpy())
-        done += b
+        ckpt.add(inception(img)[0].squeeze(-1).squeeze(-1).cpu().numpy(), b, dt)
+        done = ckpt.done
         if done % (args.batch * 8) < args.batch:
-            print(f"  {cell}: {done}/{args.n}  ({t_gen/done*1000:.0f} ms/img, "
+            print(f"  {cell}: {done}/{args.n}  ({ckpt.t_gen/done*1000:.0f} ms/img, "
                   f"{cached.compute_calls}/{args.steps} compute)", flush=True)
 
-    act = np.concatenate(feats, 0)[: args.n]
-    mu, sigma = act.mean(0), np.cov(act, rowvar=False)
-    np.savez(out_npz, mu=mu, sigma=sigma, n=args.n, latency_ms=t_gen / args.n * 1000,
-             compute_calls=cached.compute_calls, steps=args.steps, method=args.method,
-             interval=args.interval, cfg=args.cfg_scale)
+    if cached.compute_calls == 0:
+        # Resumed with every image already accumulated (killed between the last
+        # checkpoint and finalize): no batch ran, so recover the compute-call count
+        # by replaying the deterministic schedule without touching the model.
+        cached.reset()
+        if args.method == "none":
+            cached.compute_calls = args.steps
+        else:
+            for _ in range(args.steps):
+                if hicache_decide(cached.state) == "full":
+                    cached.compute_calls += 1
+                cached.state["step"] += 1
+
+    t_gen = ckpt.t_gen
+    ckpt.finalize(args.n, latency_ms=t_gen / args.n * 1000,
+                  compute_calls=cached.compute_calls, steps=args.steps, method=args.method,
+                  interval=args.interval, cfg=args.cfg_scale)
     print(f"[done] {cell}: {t_gen/args.n*1000:.1f} ms/img, "
           f"{cached.compute_calls}/{args.steps} compute calls -> {out_npz}")
 

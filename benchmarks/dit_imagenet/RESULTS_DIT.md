@@ -133,7 +133,11 @@ CUDA_VISIBLE_DEVICES=0 OMP_NUM_THREADS=2 ../../../../gim_env/bin/python bench_di
    drift column is the primary, protocol-clean metric.
 3. `--batch 128` OOMs on 32 GB in the VAE decode; no throughput gain over 64 anyway
    (GPU saturated: 1804 vs 1841 ms/img at batch 128 vs 32).
-4. `bench_dit.py` has no mid-cell checkpointing: a killed 50k cell restarts from 0.
+4. ~~`bench_dit.py` has no mid-cell checkpointing: a killed 50k cell restarts from 0.~~
+   FIXED 2026-06-10: per-1k-image atomic checkpointing (`<cell>.partial.npz`, resumed
+   automatically; final npz format unchanged; resumed stats bit-identical to an
+   uninterrupted run, see `tests/test_bench_checkpoint.py`). Cells generated before
+   the fix were single-shot runs and are unaffected.
 5. Smoke observation to verify in Phase 1: at batch 32, `auto_i4` ran 837 ms/img vs
    `hermite_i4` 486 ms/img at identical compute calls (65/250) — DMD/auto forecast
    overhead (per-skip-step SVD fit) is material and the speedup column reflects it.

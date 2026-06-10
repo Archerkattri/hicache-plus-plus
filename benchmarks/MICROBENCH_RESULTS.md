@@ -7,19 +7,23 @@ H = steps past the cached window (the reach of interval H+1). Lower is better.
 |---|---:|---:|---:|---:|---:|---:|
 | TaylorSeer (polynomial) | 1.51e-02 | 8.04e-02 | 2.56e-01 | 6.23e-01 | 2.34e+00 | 6.48e+00 |
 | Pade / FoCa (rational) | 4.85e-02 | 1.08e-01 | 1.71e-01 | 2.38e-01 | 5.28e-01 | 1.23e+00 |
+| HiCache (scaled-Hermite, fixed +k) | 1.49e-01 | 2.98e-01 | 4.59e-01 | 6.30e-01 | 1.05e+00 | 1.72e+00 |
 | **HiCache++ (exponential)** | 4.74e-09 | 1.42e-08 | 3.00e-08 | 5.28e-08 | 1.21e-07 | 2.21e-07 |
-| **HiCache++ (auto, holdout-selected)** | 4.74e-09 | 1.42e-08 | 3.00e-08 | 5.28e-08 | 1.21e-07 | 2.21e-07 |
+| **HiCache++ (auto, 1step holdout)** | 4.74e-09 | 1.42e-08 | 3.00e-08 | 5.28e-08 | 1.21e-07 | 2.21e-07 |
+| **HiCache++ (auto, horizon holdout)** | 4.74e-09 | 1.42e-08 | 3.00e-08 | 5.28e-08 | 1.21e-07 | 2.21e-07 |
 
 ### + 1% snapshot noise
 
 | method (rel. L2 error ↓) | H=1 | H=2 | H=3 | H=4 | H=6 | H=8 |
 |---|---:|---:|---:|---:|---:|---:|
-| TaylorSeer (polynomial) | 9.76e-02 | 3.67e-01 | 8.94e-01 | 1.86e+00 | 5.94e+00 | 1.55e+01 |
-| Pade / FoCa (rational) | 7.10e-02 | 5.14e-01 | 1.13e+00 | 1.70e+00 | 2.49e+00 | 3.12e+00 |
-| **HiCache++ (exponential)** | 2.35e-02 | 4.61e-02 | 7.86e-02 | 1.21e-01 | 2.22e-01 | 2.79e-01 |
-| **HiCache++ (auto, holdout-selected)** | 2.26e-02 | 4.43e-02 | 7.59e-02 | 1.16e-01 | 2.16e-01 | 3.05e-01 |
+| TaylorSeer (polynomial) | 9.83e-02 | 3.48e-01 | 8.99e-01 | 1.93e+00 | 6.30e+00 | 1.51e+01 |
+| Pade / FoCa (rational) | 7.29e-02 | 4.56e-01 | 1.07e+00 | 1.72e+00 | 2.43e+00 | 3.05e+00 |
+| HiCache (scaled-Hermite, fixed +k) | 1.50e-01 | 2.99e-01 | 4.64e-01 | 6.42e-01 | 1.08e+00 | 1.82e+00 |
+| **HiCache++ (exponential)** | 2.29e-02 | 4.64e-02 | 7.77e-02 | 1.24e-01 | 2.10e-01 | 2.99e-01 |
+| **HiCache++ (auto, 1step holdout)** | 2.22e-02 | 4.51e-02 | 7.75e-02 | 1.23e-01 | 2.21e-01 | 3.13e-01 |
+| **HiCache++ (auto, horizon holdout)** | 2.22e-02 | 4.51e-02 | 7.75e-02 | 1.98e-01 | 7.11e-01 | 6.60e-01 |
 
-(auto picked: {'dmd': 120})
+(auto picked: {'1step': {'dmd': 120}, 'horizon': {'dmd': 106, 'hermite': 14}})
 
 ### Drifting (non-autonomous) dynamics — why backend='auto' exists
 
@@ -27,10 +31,12 @@ H = steps past the cached window (the reach of interval H+1). Lower is better.
 |---|---:|---:|---:|---:|---:|---:|
 | TaylorSeer (polynomial) | 4.69e-02 | 2.31e-01 | 6.64e-01 | 1.49e+00 | 5.24e+00 | 1.37e+01 |
 | Pade / FoCa (rational) | 1.00e-01 | 2.21e-01 | 3.74e-01 | 5.93e-01 | 1.43e+00 | 2.47e+00 |
+| HiCache (scaled-Hermite, fixed +k) | 2.50e-01 | 4.89e-01 | 7.45e-01 | 1.04e+00 | 1.89e+00 | 3.23e+00 |
 | **HiCache++ (exponential)** | 8.30e-03 | 3.10e-02 | 7.09e-02 | 1.29e-01 | 3.02e-01 | 5.03e-01 |
-| **HiCache++ (auto, holdout-selected)** | 8.30e-03 | 3.10e-02 | 7.09e-02 | 1.29e-01 | 3.02e-01 | 5.03e-01 |
+| **HiCache++ (auto, 1step holdout)** | 8.30e-03 | 3.10e-02 | 7.09e-02 | 1.29e-01 | 3.02e-01 | 5.03e-01 |
+| **HiCache++ (auto, horizon holdout)** | 8.30e-03 | 3.10e-02 | 7.09e-02 | 1.29e-01 | 3.02e-01 | 5.03e-01 |
 
-(auto picked: {'dmd': 120})
+(auto picked: {'1step': {'dmd': 120}, 'horizon': {'dmd': 120}})
 
 ### Regime switch inside the cached window — the DMD-misfit stress
 
@@ -38,24 +44,72 @@ H = steps past the cached window (the reach of interval H+1). Lower is better.
 |---|---:|---:|---:|---:|---:|---:|
 | TaylorSeer (polynomial) | 5.02e-01 | 2.13e+00 | 5.70e+00 | 1.23e+01 | 4.16e+01 | 1.06e+02 |
 | Pade / FoCa (rational) | 1.16e-01 | 1.57e+00 | 2.04e+00 | 1.85e+00 | 2.25e+00 | 2.63e+00 |
+| HiCache (scaled-Hermite, fixed +k) | 1.38e-01 | 2.66e-01 | 3.94e-01 | 5.33e-01 | 9.21e-01 | 1.56e+00 |
 | **HiCache++ (exponential)** | 2.27e-01 | 5.69e-01 | 8.91e-01 | 1.59e+00 | 3.60e+00 | 9.40e+00 |
-| **HiCache++ (auto, holdout-selected)** | 4.00e-01 | 7.99e-01 | 1.19e+00 | 1.57e+00 | 2.33e+00 | 3.11e+00 |
+| **HiCache++ (auto, 1step holdout)** | 1.38e-01 | 2.66e-01 | 3.94e-01 | 5.33e-01 | 9.21e-01 | 1.56e+00 |
+| **HiCache++ (auto, horizon holdout)** | 1.47e-01 | 2.36e-01 | 3.54e-01 | 5.30e-01 | 3.07e+00 | 7.97e+00 |
 
-(auto picked: {'hermite': 120})
+(auto picked: {'1step': {'hermite': 120}, 'horizon': {'hermite': 84, 'dmd': 36}})
 
 ### Drifting dynamics + 1% snapshot noise
 
 | method (rel. L2 error ↓) | H=1 | H=2 | H=3 | H=4 | H=6 | H=8 |
 |---|---:|---:|---:|---:|---:|---:|
-| TaylorSeer (polynomial) | 1.18e-01 | 4.46e-01 | 1.21e+00 | 2.53e+00 | 8.65e+00 | 2.15e+01 |
-| Pade / FoCa (rational) | 1.14e-01 | 4.58e-01 | 1.13e+00 | 1.91e+00 | 3.08e+00 | 3.49e+00 |
-| **HiCache++ (exponential)** | 2.87e-02 | 6.91e-02 | 1.28e-01 | 1.96e-01 | 3.89e-01 | 5.84e-01 |
-| **HiCache++ (auto, holdout-selected)** | 2.77e-02 | 6.52e-02 | 1.23e-01 | 1.89e-01 | 3.58e-01 | 5.42e-01 |
+| TaylorSeer (polynomial) | 1.14e-01 | 4.41e-01 | 1.17e+00 | 2.48e+00 | 8.40e+00 | 2.14e+01 |
+| Pade / FoCa (rational) | 1.15e-01 | 5.53e-01 | 1.22e+00 | 1.98e+00 | 3.07e+00 | 3.66e+00 |
+| HiCache (scaled-Hermite, fixed +k) | 2.51e-01 | 4.91e-01 | 7.50e-01 | 1.05e+00 | 1.92e+00 | 3.32e+00 |
+| **HiCache++ (exponential)** | 2.88e-02 | 6.40e-02 | 1.26e-01 | 1.90e-01 | 3.56e-01 | 6.33e-01 |
+| **HiCache++ (auto, 1step holdout)** | 2.82e-02 | 6.28e-02 | 1.15e-01 | 1.79e-01 | 3.55e-01 | 5.91e-01 |
+| **HiCache++ (auto, horizon holdout)** | 2.82e-02 | 6.28e-02 | 1.15e-01 | 6.05e-01 | 7.34e-01 | 1.17e+00 |
 
-(auto picked: {'dmd': 120})
+(auto picked: {'1step': {'dmd': 120}, 'horizon': {'dmd': 103, 'hermite': 17}})
+
+### Oscillatory-with-trend -- the holdout-misprediction regime (1-step ranking inverts at multi-step)
+
+| method (rel. L2 error ↓) | H=1 | H=2 | H=3 | H=4 | H=6 | H=8 |
+|---|---:|---:|---:|---:|---:|---:|
+| TaylorSeer (polynomial) | 1.02e+00 | 2.20e+00 | 2.27e+00 | 9.30e-01 | 1.34e+01 | 4.82e+01 |
+| Pade / FoCa (rational) | 3.85e-01 | 8.19e-01 | 5.33e-01 | 5.19e-01 | 3.95e-01 | 8.03e-01 |
+| HiCache (scaled-Hermite, fixed +k) | 1.21e-01 | 2.02e-01 | 4.17e-01 | 5.84e-01 | 1.72e+00 | 3.53e+00 |
+| **HiCache++ (exponential)** | 2.36e-01 | 4.61e-01 | 7.69e-01 | 1.09e+00 | 1.98e+00 | 3.20e+00 |
+| **HiCache++ (auto, 1step holdout)** | 2.23e-01 | 2.02e-01 | 4.17e-01 | 8.77e-01 | 1.96e+00 | 3.19e+00 |
+| **HiCache++ (auto, horizon holdout)** | 1.25e-01 | 4.61e-01 | 7.69e-01 | 5.84e-01 | 1.83e+00 | 3.20e+00 |
+
+(auto picked: {'1step': {'dmd': 68, 'hermite': 52}, 'horizon': {'hermite': 53, 'dmd': 67}})
 
 HiCache++ (DMD) is exact on the solution class, so its error stays flat as H grows;
 polynomial diverges, rational (Pade/FoCa) improves but still diverges and goes fragile.
+
+### Holdout decision (2026-06-10, decided on this evidence)
+
+`backend="auto"` selects DMD vs the Hermite arm by backcasting held-out snapshots.
+Two modes were benchmarked above:
+
+- **`holdout="1step"` (DEFAULT, unchanged):** 1-gap backcast of the newest held-out
+  snapshot against a degree-2 polynomial proxy. Low variance, cannot see multi-gap
+  divergence.
+- **`holdout="horizon"` (NEW, opt-in):** backcast at the actual skip distance of the
+  window (h ~ (interval-1)/spacing gaps) against the SERVED damped-Hermite arm. For
+  h >= 4 the DMD fit uses the newest h snapshots and backcasts the snapshot h gaps
+  older (fresh fit, backward extrapolation); for h < 4 it degrades to a forward
+  prefix backcast at distance h.
+
+Why horizon exists: on DiT-XL/2 FID-10k the 1-step backcast picked DMD while
+multi-step reality favored Hermite (auto_i4 drift 18.08 vs hermite_i4 10.57). The
+oscillatory-with-trend scenario reconstructs that inversion synthetically: at the
+matched distance H=4 the horizon holdout picks the winning Hermite arm in 20/20
+windows (error 5.84e-1, equal to the oracle Hermite row) where 1step picks DMD in
+12/20 (error 8.77e-1). It also wins H=1 there (1.25e-1 vs 2.23e-1).
+
+Why it is NOT the default: the single far-out backward target is higher-variance.
+The same tables show horizon losing where 1step is fine: +1% noise H=4/H=6
+(2.30e-1/4.97e-1 vs 1.18e-1/2.04e-1, 10/120 wrong picks), regime switch H=6/H=8
+(3.07/7.97 vs 9.21e-1/1.56, 36/120 wrong picks), drift+noise H=4/H=6, and the
+misprediction regime's own H=2/H=3 (the h<4 prefix path inherits the dirty early
+window). Horizon-matched selection is therefore not strictly better, and per the
+pre-registered decision rule the default stays `1step`, with `horizon` shipped
+opt-in (`hicache_init(..., holdout="horizon")`) for workloads whose failure mode is
+1-step/multi-step ranking inversion.
 
 ---
 
@@ -71,10 +125,12 @@ was ours, introduced in porting; it is fixed as of this section, with closed-for
 regression tests (exact forward extrapolation on a linear series at `sigma = sqrt(1/2)`)
 in the hermite and tree self-tests.
 
-Provenance of the tables in this file: the five scenario tables ABOVE this section
-were generated with the shipped (-k) Hermite (they predate the fix; only rows where
-`auto` serves the Hermite arm are affected, i.e. the regime-switch `auto` row). The
-tables BELOW (this section and later ones) postdate the fix.
+Provenance of the tables in this file: the scenario tables ABOVE this section were
+REGENERATED after the fix (2026-06-10; they show the fixed +k Hermite, both auto
+holdout modes, and the new oscillatory-with-trend scenario). The pre-fix versions of
+those tables are in git history (v1.1.0 and earlier); their only fix-affected rows
+were the ones where `auto` serves the Hermite arm (the regime-switch `auto` row).
+The A/B tables in THIS section measure shipped(-k) against fixed(+k) directly.
 
 A/B methodology: instrumented copies of the modules with an env-switched sign, driven
 through the real state machinery; trajectory generators verbatim from

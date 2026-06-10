@@ -26,6 +26,8 @@ this is the novel contribution.
 """
 from __future__ import annotations
 
+import math
+
 import torch
 
 
@@ -130,7 +132,7 @@ def dmd_forecast_state(state) -> torch.Tensor:
 def _poly2_backcast(prefix, k: float) -> torch.Tensor:
     """Degree-2 Newton-forward extrapolation from the last three of ``prefix``
     --- the polynomial analogue of the Hermite basis, used only as the holdout
-    yardstick in :func:`auto_forecast_state`."""
+    yardstick of the ``holdout="1step"`` mode in :func:`auto_forecast_state`."""
     f0, f1, f2 = prefix[-3], prefix[-2], prefix[-1]
     d1 = f2 - f1
     d2 = (f2 - f1) - (f1 - f0)
@@ -138,20 +140,70 @@ def _poly2_backcast(prefix, k: float) -> torch.Tensor:
     return f2 + d1 * x + 0.5 * d2 * x * (x - 1)
 
 
+def _hermite_holdout_eval(prefix, k: float, sigma: float, max_order: int) -> torch.Tensor:
+    """The SERVED Hermite arm rebuilt from a snapshot list: damped scaled-Hermite
+    forecast from the newest ``max_order+1`` of ``prefix`` (unit anchor spacing),
+    evaluated at SIGNED distance ``k`` past ``prefix[-1]`` (negative = backward).
+    Used as the holdout yardstick of the ``holdout="horizon"`` mode, so the
+    selection compares DMD against what the fallback arm would actually serve,
+    not against an undamped polynomial proxy."""
+    try:                                                         # lazy: keep standalone-testable
+        from .hermite import scaled_hermite
+    except ImportError:
+        from hermite import scaled_hermite
+    m = max(1, min(int(max_order), len(prefix) - 1))
+    diffs = [prefix[-1]]
+    cur = list(prefix[-(m + 1):])
+    for _ in range(m):
+        cur = [cur[i + 1] - cur[i] for i in range(len(cur) - 1)]
+        diffs.append(cur[-1])
+    x = torch.tensor(float(k), dtype=prefix[-1].dtype, device=prefix[-1].device)
+    out = diffs[0]
+    for order in range(1, m + 1):
+        out = out + diffs[order] / math.factorial(order) * scaled_hermite(order, x, sigma)
+    return out
+
+
 def auto_forecast_state(state) -> torch.Tensor:
     """Holdout-selected forecast: serve DMD only when it *demonstrably* beats
-    the polynomial on the data at hand (``backend="auto"``).
+    the polynomial arm on the data at hand (``backend="auto"``).
 
     Diffusion feature dynamics are non-autonomous --- the propagator drifts
     across timesteps --- so the exponential fit can occasionally misfit a
     window where the polynomial would have been fine. Rather than trusting
-    either basis a priori, hold out the NEWEST snapshot: fit DMD on the
-    uniform tail *minus* its last snapshot and backcast that held-out
-    snapshot at horizon 1; do the same with the degree-2 polynomial. Whichever
-    basis reproduces the held-out snapshot better is served for the current
-    skip window. The selection is cached per compute step (it can only change
-    when a new snapshot arrives), so the extra cost is one small SVD per
-    *compute* step, amortized over all the skip steps that follow it.
+    either basis a priori, backcast a held-out snapshot with both arms and
+    serve whichever reproduces it better for the current skip window. Two
+    holdout modes (``state["holdout"]``):
+
+    ``"1step"`` (default)
+        Fit on the tail minus the newest snapshot, backcast it at distance 1
+        against the degree-2 Newton polynomial. Cheap and robust: the target
+        sits one gap from the fit, so the test is low-variance, but it cannot
+        see multi-gap divergence.
+
+    ``"horizon"`` (opt-in)
+        Distance-matched selection: backcast at the ACTUAL skip distance of the
+        window, ``h ~ (interval-1)/spacing`` snapshot gaps, against the SERVED
+        Hermite arm (damped scaled-Hermite, the real fallback) instead of an
+        undamped polynomial proxy. For ``h >= 4`` the DMD fit uses the NEWEST
+        ``h`` snapshots and backcasts the snapshot ``h`` gaps older (a fresh
+        fit, backward extrapolation ``lambda**(-h)``); a 1-gap backcast cannot
+        see multi-gap divergence, which makes ``"1step"`` mispredict on
+        trajectories whose short-range structure (e.g. a decaying or
+        frequency-drifting oscillation) is forecastable one gap out but stale
+        at the served distance. For ``h < 4`` (not enough snapshots to hold
+        ``h`` out, or a sub-spacing skip distance as in a typical interval-N
+        cache where the served horizon is fractional) it degrades to the
+        forward prefix backcast at distance ``h``. Evidence (microbench,
+        full tables in benchmarks/MICROBENCH_RESULTS.md): horizon-matching
+        picks correctly in the oscillatory-with-trend misprediction regime
+        where 1step serves the losing arm, but its single far-out target is
+        higher-variance under noise and regime switches, so it is NOT
+        strictly better and stays opt-in.
+
+    The selection is cached per compute step (it can only change when a new
+    snapshot arrives), so the extra cost is one small SVD per *compute* step,
+    amortized over all the skip steps that follow it.
 
     Falls back exactly like :func:`dmd_forecast_state` (Hermite) when the
     uniform tail is shorter than 5 (4 to fit + 1 held out)."""
@@ -167,15 +219,43 @@ def auto_forecast_state(state) -> torch.Tensor:
                 j -= 1
             if len(tail) >= 5:
                 vels = [v for _, v in reversed(tail)]            # oldest..newest
-                cache_key = (steps[-1], len(vels))
+                mode = str(state.get("holdout", "1step"))
+                if mode == "horizon":
+                    iv = int(state.get("interval", 0))
+                    kf_max = ((iv - 1.0) / spacing if iv > 1
+                              else (state["step"] - steps[-1]) / spacing)
+                    h = max(1, min(int(math.ceil(kf_max)), len(vels) - 1))
+                    if h < 4 and len(vels) - h < 4:
+                        h = max(1, len(vels) - 4)
+                else:
+                    h = 1
+                cache_key = (steps[-1], len(vels), mode, h)
                 choice = state.get("_auto_choice") \
                     if state.get("_auto_choice_key") == cache_key else None
                 if choice is None:
-                    held = vels[-1]
-                    denom = held.norm().clamp_min(1e-12)
-                    e_dmd = (dmd_forecast(vels[:-1], 1) - held).norm() / denom
-                    e_poly = (_poly2_backcast(vels[:-1], 1.0) - held).norm() / denom
-                    choice = "dmd" if float(e_dmd) <= float(e_poly) else "hermite"
+                    sigma = float(state.get("sigma", 0.5))
+                    max_order = int(state.get("max_order", 2))
+                    if mode == "horizon" and h >= 4:
+                        # fresh fit on the newest h snapshots, held-out target h
+                        # gaps OLDER, matched backward distance -h
+                        fit, held = vels[-h:], vels[-1 - h]
+                        denom = held.norm().clamp_min(1e-12)
+                        e_dmd = (dmd_forecast(fit, -h) - held).norm() / denom
+                        e_arm = (_hermite_holdout_eval(fit, -h, sigma, max_order)
+                                 - held).norm() / denom
+                    elif mode == "horizon":
+                        # forward prefix backcast at the matched distance h
+                        fit, held = vels[:-h], vels[-1]
+                        denom = held.norm().clamp_min(1e-12)
+                        e_dmd = (dmd_forecast(fit, h) - held).norm() / denom
+                        e_arm = (_hermite_holdout_eval(fit, float(h), sigma, max_order)
+                                 - held).norm() / denom
+                    else:
+                        fit, held = vels[:-1], vels[-1]
+                        denom = held.norm().clamp_min(1e-12)
+                        e_dmd = (dmd_forecast(fit, 1) - held).norm() / denom
+                        e_arm = (_poly2_backcast(fit, 1.0) - held).norm() / denom
+                    choice = "dmd" if float(e_dmd) <= float(e_arm) else "hermite"
                     state["_auto_choice"] = choice
                     state["_auto_choice_key"] = cache_key
                 if choice == "dmd":
@@ -258,6 +338,81 @@ if __name__ == "__main__":
                 "derivatives": {0: traj[7]}, "activated_steps": [7]}
     check("DMD < 4 snapshots -> Hermite fallback (last value)",
           torch.allclose(dmd_forecast_state(st_short), traj[7]))
+
+    # ------------------------------------------------------------------
+    # auto backend: 1step vs horizon holdout selection
+    # ------------------------------------------------------------------
+    try:
+        from hicache_pp.hermite import hicache_init, hicache_update_derivatives
+    except ImportError:
+        from hermite import hicache_init, hicache_update_derivatives
+    import math as _math
+
+    def _drive(snaps, horizon, holdout):
+        st = hicache_init(num_steps=10 ** 6, interval=horizon + 1, max_order=2,
+                          first_enhance=0, sigma=0.5, backend="auto",
+                          history=len(snaps), holdout=holdout)
+        for t, F in enumerate(snaps):
+            st["step"] = t
+            st["activated_steps"].append(t)
+            hicache_update_derivatives(st, F)
+            dmd_update_snapshots(st, F, history=len(snaps))
+        st["step"] = (len(snaps) - 1) + horizon
+        return st
+
+    # the holdout-misprediction regime (oscillatory-with-trend, see
+    # benchmarks/forecast_microbench.py::make_traj_osc_trend, seed 0): a smooth
+    # curved trend + a decaying, frequency-drifting oscillation. The 1-gap
+    # backcast scores DMD well (the oscillation is forecastable one gap out) but
+    # at the served distance H=4 the oscillation is decayed/stale and the damped
+    # Hermite arm wins -- the distance-matched horizon holdout catches this.
+    g = torch.Generator().manual_seed(0)
+    Amp = torch.randn(64, generator=g, dtype=torch.float64)
+    Cur = torch.randn(64, generator=g, dtype=torch.float64)
+    Osc = torch.randn(64, generator=g, dtype=torch.float64)
+    H_mis, hist_mis, T_mis = 4, 8, 14
+    traj_mis, phase = [], 0.0
+    for t in range(T_mis):
+        frac = t / float(T_mis)
+        phase += 2.2 * (1.0 + 0.5 * frac)
+        traj_mis.append(Amp * (2.0 * _math.tanh(2.5 * (frac - 0.45)))
+                        + Cur * (1.5 * frac * frac)
+                        + Osc * (0.8 * (0.85 ** t) * _math.cos(phase))
+                        + 0.01 * torch.randn(64, generator=g, dtype=torch.float64))
+    snaps_mis = traj_mis[:hist_mis]
+    truth_mis = traj_mis[hist_mis - 1 + H_mis]
+    st_1s = _drive(snaps_mis, H_mis, "1step")
+    out_1s = auto_forecast_state(st_1s)
+    st_hz = _drive(snaps_mis, H_mis, "horizon")
+    out_hz = auto_forecast_state(st_hz)
+    check("misprediction regime: 1step holdout picks dmd (the inversion)",
+          st_1s.get("_auto_choice") == "dmd")
+    check("misprediction regime: horizon holdout picks hermite (correct)",
+          st_hz.get("_auto_choice") == "hermite")
+    err_1s = (out_1s - truth_mis).norm()
+    err_hz = (out_hz - truth_mis).norm()
+    check(f"horizon-selected forecast beats 1step-selected at the served distance "
+          f"({err_hz:.3f} < {err_1s:.3f})", err_hz < err_1s)
+
+    # sanity: on the clean exponential class the horizon holdout still picks DMD
+    snaps_exp = traj[:8]
+    st_exp = _drive(snaps_exp, 4, "horizon")
+    pred_exp = auto_forecast_state(st_exp)
+    check("horizon holdout still picks dmd on clean exponentials",
+          st_exp.get("_auto_choice") == "dmd")
+    rel_exp = (pred_exp - traj[11]).norm() / traj[11].norm()
+    check(f"horizon-auto exact on exponential @H=4 (rel {rel_exp:.2e} < 1e-5)", rel_exp < 1e-5)
+
+    # selection is cached per (window, mode, distance); switching the mode re-selects
+    check("auto choice cache key includes holdout mode",
+          st_1s["_auto_choice_key"] != st_hz["_auto_choice_key"])
+
+    # short-horizon horizon mode (h < 4 -> forward prefix path) stays valid
+    st_h2 = _drive(snaps_mis, 2, "horizon")
+    out_h2 = auto_forecast_state(st_h2)
+    check("horizon holdout h<4 (prefix path) returns a finite forecast and a choice",
+          torch.isfinite(out_h2).all().item()
+          and st_h2.get("_auto_choice") in ("dmd", "hermite"))
 
     print("\nALL PASS" if ok else "\nSOME FAILED")
     raise SystemExit(0 if ok else 1)

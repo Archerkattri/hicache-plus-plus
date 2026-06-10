@@ -88,6 +88,7 @@ def hicache_init(
     sigma: float = 0.5,
     backend: str = "hermite",
     history: int = 5,
+    holdout: str = "1step",
 ) -> Dict[str, Any]:
     """Create a fresh HiCache state dict for one sampling run.
 
@@ -102,6 +103,15 @@ def hicache_init(
                  forecasts from raw velocity snapshots, with Hermite as warm-up
                  fallback -- see ``hicache_dmd.py``).
     history    : DMD snapshot window length (ignored by the Hermite backend).
+    holdout    : selection test of the ``"auto"`` backend (ignored otherwise) --
+                 ``"1step"`` (default): 1-gap backcast of the newest held-out
+                 snapshot against a degree-2 polynomial proxy; ``"horizon"``
+                 (opt-in): backcast a held-out snapshot at the actual skip
+                 distance of the window against the served Hermite arm.
+                 Horizon-matching fixes regimes where the 1-gap ranking inverts
+                 at the served distance, but its single far-out target makes the
+                 selection noisier elsewhere -- it is not strictly better on the
+                 microbench, hence opt-in. See ``auto_forecast_state``.
     """
     if interval < 1:
         raise ValueError("interval must be >= 1")
@@ -111,6 +121,8 @@ def hicache_init(
         raise ValueError(f"sigma must be in (0, 1), got {sigma}")
     if backend not in ("hermite", "dmd", "auto"):
         raise ValueError(f"backend must be 'hermite', 'dmd', or 'auto', got {backend!r}")
+    if holdout not in ("horizon", "1step"):
+        raise ValueError(f"holdout must be 'horizon' or '1step', got {holdout!r}")
     return {
         "num_steps": int(num_steps),
         "interval": int(interval),
@@ -120,6 +132,7 @@ def hicache_init(
         "sigma": float(sigma),
         "backend": str(backend),
         "history": int(history),
+        "holdout": str(holdout),
         "step": 0,
         "counter": 0,            # forecasts since last compute
         "type": None,            # "full" | "forecast"

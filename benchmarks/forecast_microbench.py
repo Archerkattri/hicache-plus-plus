@@ -147,30 +147,77 @@ def make_traj_switch(T, d=64, n_modes=2, seed=0, t_switch=None):
     return traj
 
 
-def forecast_auto(snaps, horizon, max_order=2):
-    """The SHIPPED HiCache++ ``backend='auto'`` path, driven end-to-end through the
-    real state machinery (hicache_init/update + dmd_update_snapshots +
-    auto_forecast_state) -- holdout-selects DMD vs the Hermite fallback per window."""
+def _state_through_machinery(snaps, horizon, max_order=2, backend="auto", holdout="horizon"):
+    """Drive the real state machinery (hicache_init/update + dmd_update_snapshots)
+    over the cached window and position the state at the queried skip step."""
     from hicache_pp.hermite import hicache_init, hicache_update_derivatives
-    from hicache_pp.dmd import dmd_update_snapshots, auto_forecast_state
+    from hicache_pp.dmd import dmd_update_snapshots
     st = hicache_init(num_steps=10 ** 6, interval=horizon + 1, max_order=max_order,
-                      first_enhance=0, sigma=0.5, backend="auto", history=len(snaps))
+                      first_enhance=0, sigma=0.5, backend=backend, history=len(snaps),
+                      holdout=holdout)
     for t, F in enumerate(snaps):
         st["step"] = t
         st["activated_steps"].append(t)
         hicache_update_derivatives(st, F)
         dmd_update_snapshots(st, F, history=len(snaps))
     st["step"] = (len(snaps) - 1) + horizon
+    return st
+
+
+def make_traj_osc_trend(T, d=64, seed=0, noise=0.01, sharp=2.5, knee=0.45, q=1.5,
+                        amp=0.8, r=0.85, w0=2.2, w_drift=0.5):
+    """The HOLDOUT-MISPREDICTION regime (oscillatory-with-trend): a smooth curved
+    trend (tanh knee + mild quadratic, NOT a sum of a few exponentials) plus a
+    decaying oscillation whose frequency drifts across the window, plus 1% noise.
+    Short-range structure (the oscillation) is forecastable one snapshot gap out,
+    so a 1-gap backcast scores DMD well; at the served multi-gap distance the
+    oscillation has decayed and its fitted phase is stale, so the damped Hermite
+    arm wins. A 1-step holdout therefore picks DMD where serving it loses; the
+    distance-matched horizon holdout exposes the inversion. This is the synthetic
+    analogue of the DiT-XL/2 FID-10k auto_i4 misprediction (auto served DMD at
+    18.08 FID-vs-baseline where the Hermite arm scored 10.57)."""
+    g = torch.Generator().manual_seed(seed)
+    A = torch.randn(d, generator=g, dtype=torch.float64)      # trend direction
+    C = torch.randn(d, generator=g, dtype=torch.float64)      # curvature direction
+    B = torch.randn(d, generator=g, dtype=torch.float64)      # oscillation direction
+    traj, phase = [], 0.0
+    for t in range(T):
+        frac = t / float(T)
+        phase += w0 * (1.0 + w_drift * frac)
+        trend = A * (2.0 * math.tanh(sharp * (frac - knee))) + C * (q * frac * frac)
+        osc = B * (amp * (r ** t) * math.cos(phase))
+        eps = noise * torch.randn(d, generator=g, dtype=torch.float64)
+        traj.append(trend + osc + eps)
+    return traj
+
+
+def forecast_auto(snaps, horizon, max_order=2, holdout="horizon"):
+    """The SHIPPED HiCache++ ``backend='auto'`` path, driven end-to-end through the
+    real state machinery -- holdout-selects DMD vs the Hermite fallback per window
+    (``holdout="1step"`` legacy 1-gap test, ``"horizon"`` distance-matched test)."""
+    from hicache_pp.dmd import auto_forecast_state
+    st = _state_through_machinery(snaps, horizon, max_order, "auto", holdout)
     return auto_forecast_state(st), st.get("_auto_choice")
+
+
+def forecast_hermite(snaps, horizon, max_order=2):
+    """The served HiCache (scaled-Hermite, sigma=0.5) arm through the real machinery
+    -- the fallback `auto` serves, and the basis the +k sign fix applies to."""
+    from hicache_pp.hermite import hicache_forecast
+    st = _state_through_machinery(snaps, horizon, max_order, "hermite")
+    return hicache_forecast(st)
 
 
 def run(noise=0.0, seeds=20, horizons=(1, 2, 3, 4, 6, 8), order=3, history=8, n_modes=2,
         drift=False):
     # auto-rank on clean data finds the true mode count; under noise we cap to the physical
-    # signal rank (2 real DOF per complex pole) so the SVD truncation rejects the noise subspace.
-    rank = 2 * n_modes if (noise or drift) else 0
-    out = {"TaylorSeer": {}, "Pade": {}, "HiCache++": {}, "HiCache++ auto": {}}
-    picks = {}
+    # signal rank (2 real DOF per complex pole) so the SVD truncation rejects the noise
+    # subspace. The osc-trend misprediction regime is not a finite sum of exponentials,
+    # so there is no physical rank to cap to: keep auto-rank.
+    rank = 2 * n_modes if (noise or drift) and drift != "osctrend" else 0
+    out = {"TaylorSeer": {}, "Pade": {}, "Hermite": {}, "HiCache++": {},
+           "HiCache++ auto 1step": {}, "HiCache++ auto horizon": {}}
+    picks = {"1step": {}, "horizon": {}}
     for Hz in horizons:
         acc = {k: [] for k in out}
         for seed in range(seeds):
@@ -178,6 +225,8 @@ def run(noise=0.0, seeds=20, horizons=(1, 2, 3, 4, 6, 8), order=3, history=8, n_
             if drift == "switch":
                 traj = make_traj_switch(T_total, n_modes=n_modes, seed=seed,
                                         t_switch=history - 3)
+            elif drift == "osctrend":
+                traj = make_traj_osc_trend(T_total, seed=seed)
             elif drift:
                 traj = make_traj_drift(T_total, n_modes=n_modes, seed=seed)
             else:
@@ -187,13 +236,17 @@ def run(noise=0.0, seeds=20, horizons=(1, 2, 3, 4, 6, 8), order=3, history=8, n_
                 snaps = [F + noise * F.norm() / F.numel() ** 0.5 * torch.randn_like(F)
                          for F in snaps]
             truth = traj[(history - 1) + Hz]
-            auto_pred, auto_choice = forecast_auto(snaps, Hz)
-            picks[auto_choice] = picks.get(auto_choice, 0) + 1
+            pred_1s, choice_1s = forecast_auto(snaps, Hz, holdout="1step")
+            pred_hz, choice_hz = forecast_auto(snaps, Hz, holdout="horizon")
+            picks["1step"][choice_1s] = picks["1step"].get(choice_1s, 0) + 1
+            picks["horizon"][choice_hz] = picks["horizon"].get(choice_hz, 0) + 1
             preds = {
                 "TaylorSeer": forecast_taylor(snaps, Hz, order),
                 "Pade": forecast_pade(snaps, Hz),
+                "Hermite": forecast_hermite(snaps, Hz),
                 "HiCache++": forecast_dmd(snaps, Hz, rank),
-                "HiCache++ auto": auto_pred,
+                "HiCache++ auto 1step": pred_1s,
+                "HiCache++ auto horizon": pred_hz,
             }
             den = truth.norm() + 1e-12
             for name, p in preds.items():
@@ -209,9 +262,12 @@ def md_table(res, horizons):
     cols = "".join(f" H={h} |" for h in horizons)
     lines = [f"| method (rel. L2 error ↓) |{cols}", "|---|" + "".join("---:|" for _ in horizons)]
     label = {"TaylorSeer": "TaylorSeer (polynomial)", "Pade": "Pade / FoCa (rational)",
+             "Hermite": "HiCache (scaled-Hermite, fixed +k)",
              "HiCache++": "HiCache++ (exponential)",
-             "HiCache++ auto": "HiCache++ (auto, holdout-selected)"}
-    for name in ("TaylorSeer", "Pade", "HiCache++", "HiCache++ auto"):
+             "HiCache++ auto 1step": "HiCache++ (auto, 1step holdout)",
+             "HiCache++ auto horizon": "HiCache++ (auto, horizon holdout)"}
+    for name in ("TaylorSeer", "Pade", "Hermite", "HiCache++",
+                 "HiCache++ auto 1step", "HiCache++ auto horizon"):
         if name not in res:
             continue
         cells = "".join(f" {res[name][h]:.2e} |" for h in horizons)
@@ -240,6 +296,11 @@ if __name__ == "__main__":
     print(f"\n(auto picked: {r['_picks']})")
     print("\n### Drifting dynamics + 1% snapshot noise\n")
     r = run(noise=0.01, drift=True, horizons=horizons)
+    print(md_table(r, horizons))
+    print(f"\n(auto picked: {r['_picks']})")
+    print("\n### Oscillatory-with-trend -- the holdout-misprediction regime "
+          "(1-step ranking inverts at multi-step)\n")
+    r = run(drift="osctrend", horizons=horizons)
     print(md_table(r, horizons))
     print(f"\n(auto picked: {r['_picks']})")
     print("\nHiCache++ (DMD) is exact on the solution class, so its error stays flat as H grows;")

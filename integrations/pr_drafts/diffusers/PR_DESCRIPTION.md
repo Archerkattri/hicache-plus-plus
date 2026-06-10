@@ -1,4 +1,4 @@
-# [TaylorSeer cache] Add `basis="dmd"` — Dynamic Mode Decomposition (Prony) exponential forecasting
+# [TaylorSeer cache] Add `basis="dmd"`: Dynamic Mode Decomposition (Prony) exponential forecasting
 
 Extends the TaylorSeer cache hook merged in #12648 (tracking issue #12569) with an optional
 **exponential** forecast basis, selected via one new `TaylorSeerCacheConfig` field:
@@ -22,16 +22,32 @@ pipe.transformer.enable_cache(config)
 
 Default behavior (`basis="taylor"`) is bit-for-bit unchanged.
 
-## Motivation
+## Motivation (honest, family-conditional)
 
-The TaylorSeer hook forecasts skipped module outputs with a polynomial (Taylor) expansion.
-Across denoising steps a cached output stream evolves under a slowly varying, near-linear
-operator, so locally it is a sum of damped/oscillatory **exponentials** — the exact
-solution class of a linear feature-ODE. A polynomial is only a local truncation of that
-class and diverges as `cache_interval` grows, which is what limits how aggressively the
-cache can be pushed. **Dynamic Mode Decomposition** (Schmid 2010; the SVD-regularised
-generalisation of Prony's method — *not* Distribution Matching Distillation) fits the
-exponential class directly, so the forecast stays bounded and accurate at larger intervals.
+We benchmarked polynomial vs exponential forecast bases across two diffusion families and
+found that **no single basis wins**; this PR adds the exponential basis for the family
+where it wins, without touching the default.
+
+- **Flow-matching generators** (the family FLUX belongs to): across four 3D
+  flow-matching generators the exponential basis wins and its lead grows with
+  `cache_interval` (numbers below). The mechanism: across denoising steps a cached
+  output stream evolves under a slowly varying, near-linear operator, so locally it is a
+  sum of damped/oscillatory exponentials (the exact solution class of a linear
+  feature-ODE); **Dynamic Mode Decomposition** (Schmid 2010; the SVD-regularised
+  generalisation of Prony's method, *not* Distribution Matching Distillation) fits that
+  class directly where a polynomial truncation diverges.
+- **DiT-class denoising** (DiT-XL/2 ImageNet-256, 250-step DDPM): the ranking inverts.
+  The sign-correct Taylor polynomial is near-lossless (paired-noise FID drift 2.27 vs the
+  uncached baseline at 3.81x) and the exponential basis drifts 1.7-1.9x more than even a
+  near-reuse Hermite control at every interval tested. So we explicitly do **not** pitch
+  `basis="dmd"` as a better default; it is an opt-in basis, and the docstring carries the
+  per-family guidance.
+
+The reference implementation
+([hicache-plus-plus](https://github.com/Archerkattri/hicache-plus-plus)) also ships a
+training-free per-window holdout selector that backcasts a held-out snapshot with both
+bases and serves the winner; given the domain split that selector is the natural follow-up
+to this PR if maintainers want it, but this PR keeps the surface to one config field.
 
 ## Math summary
 
@@ -39,17 +55,18 @@ At full-compute steps the state additionally records the computed output as a sn
 (per output stream, capped at `dmd_history`, stored in `taylor_factors_dtype`). At
 prediction steps, per stream:
 
-1. take the longest **uniformly spaced** suffix of the snapshot history (mixed spacings —
-   e.g. across the warmup boundary — would corrupt the fit, since the identified
+1. take the longest **uniformly spaced** suffix of the snapshot history (mixed spacings,
+   e.g. across the warmup boundary, would corrupt the fit, since the identified
    propagator advances exactly one spacing per application);
-2. one economy SVD of the `[d, n]` snapshot matrix (`n ≤ dmd_history`, so negligible next
+2. one economy SVD of the `[d, n]` snapshot matrix (`n <= dmd_history`, so negligible next
    to a transformer forward) with spectrum-based rank truncation identifies the linear
-   propagator `A` from `Y_{t+1} ≈ A Y_t`;
-3. eigendecompose once and predict the (fractional) horizon `k` in spacing units by
-   eigenvalue powers: `Y_{t+k} ≈ Φ (λ^k ⊙ b)`, `b = Φ⁺ Y_t`.
+   propagator `A` from `Y_{t+1} ~ A Y_t`;
+3. eigendecompose once per compute window and predict the (fractional) horizon `k` in
+   spacing units by eigenvalue powers: `Y_{t+k} ~ Phi (lambda^k * b)`,
+   `b = pinv(Phi) Y_t`.
 
 Below the 4-snapshot identifiability floor (one complex pole costs two real degrees of
-freedom → three snapshot pairs minimum) or on any degenerate/non-finite fit, the state
+freedom, so three snapshot pairs minimum) or on any degenerate/non-finite fit, the state
 transparently falls back to the existing Taylor prediction, so warm-up and edge cases
 behave exactly like current `main`.
 
@@ -59,8 +76,9 @@ behave exactly like current `main`.
   - `TaylorSeerCacheConfig`: new fields `basis` (`"taylor"` | `"dmd"`), `dmd_history`,
     `dmd_rank`, `dmd_ridge` (+ validation, docstring, `__repr__`).
   - `TaylorSeerState`: per-stream snapshot history; `_predict_dmd()` with Taylor fallback.
-  - module-level `_dmd_forecast()` helper (torch-only; `@torch.compiler.disable`d path
-    unchanged — prediction already runs outside compiled regions).
+  - module-level `_dmd_forecast()` helper (torch-only; the
+    `@torch.compiler.disable`d path is unchanged; prediction already runs outside
+    compiled regions).
 - No new dependencies, no new public classes; one config object, per reviewer guidance on
   #12569 to keep cache backends behind their config.
 
@@ -69,18 +87,19 @@ behave exactly like current `main`.
 - Controlled (synthetic trajectories from the exponential solution class, same schedule
   and snapshots for both bases): Taylor order-1 rel. L2 forecast error ~4.6e-1 past
   warm-up; exponential basis ~4.7e-8.
-- Method-level results from the standalone implementation
-  ([hicache-plus-plus](https://github.com/Archerkattri/hicache-plus-plus)): on
-  Hunyuan3D-2.1 (a flow-matching DiT) the polynomial basis decays 0.88 → 0.74 → 0.38
-  F-score at interval 3/5/6 vs baseline 0.91, while the exponential basis holds
-  0.85 → 0.86 → 0.62; geometry-lossless to interval 6 on SAM3D.
-- **Placeholder:** the DiT-XL/2 ImageNet-256 FID-50k / IS vs latency table (both bases at
-  matched intervals) is in progress at `hicache-plus-plus/benchmarks/dit_imagenet/`;
-  it, plus FLUX.1-dev side-by-side images with this exact hook, will be attached before
-  the PR is marked ready for review.
+- Flow-matching generators (reference implementation,
+  [hicache-plus-plus](https://github.com/Archerkattri/hicache-plus-plus)): Hunyuan3D-2.1
+  (Toys4K F-score@0.05, uncached baseline 0.911): deployed polynomial arm 0.88 / 0.74 /
+  0.38 at interval 3 / 5 / 6, exponential 0.85 / 0.86 / 0.62; exactly lossless at
+  interval 5 on Hunyuan3D-2-mini; geometry-lossless (F1 = 1.000) to interval 6 on SAM3D
+  at 1.56x.
+- DiT-class denoising, included for honesty (where the polynomial should stay the
+  choice): DiT-XL/2 ImageNet-256 paired-noise FID-10k drift, exponential 18.02 / 54.24 /
+  100.65 at interval 4/6/8 vs corrected Taylor 2.27 at interval 4. Full ledger:
+  `hicache-plus-plus/benchmarks/dit_imagenet/RESULTS_DIT.md`.
+- **Placeholder:** the final DiT table (corrected-Hermite cells, selector A/B, GPU
+  re-timing, FID-50k trio) plus FLUX.1-dev side-by-side images with this exact hook will
+  be attached before the PR is marked ready for review.
 
-Honest scoping: at small intervals (≤3) the polynomial is already near-lossless and can
-edge out the exponential fit; the win is at the larger intervals (4-6) users choose for
-speed, where the polynomial collapses and the exponential degrades gracefully. Memory
-cost: `dmd_history` snapshots per cached stream (vs `max_order + 1` Taylor factors), so
-`use_lite_mode` pairs well with `basis="dmd"`.
+Memory cost: `dmd_history` snapshots per cached stream (vs `max_order + 1` Taylor
+factors), so `use_lite_mode` pairs well with `basis="dmd"`.

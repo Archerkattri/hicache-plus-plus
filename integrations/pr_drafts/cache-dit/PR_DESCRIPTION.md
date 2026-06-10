@@ -3,19 +3,30 @@
 ## Motivation
 
 cache-dit's calibrators currently forecast cached hidden states / residuals with the
-TaylorSeer **polynomial** expansion. A polynomial is only a local truncation of the
-trajectory the cached features actually follow, so its error compounds with the cache
-interval — which is exactly what caps how far `Fn/Bn` caching can be pushed before quality
-drops.
+TaylorSeer **polynomial** expansion. This PR adds a second, drop-in calibrator backend
+with an **exponential** forecast basis: **Dynamic Mode Decomposition** (Schmid 2010), the
+SVD-regularised multivariate generalisation of **Prony's method** (1795). (To avoid the
+common collision: this is *not* Distribution Matching Distillation.)
 
-This PR adds a second, drop-in calibrator backend with an **exponential** forecast basis:
-**Dynamic Mode Decomposition** (Schmid 2010), the SVD-regularised multivariate
-generalisation of **Prony's method** (1795). (To avoid the common collision: this is *not*
-Distribution Matching Distillation.) Across denoising steps each cached feature stream
-evolves under a slowly varying, near-linear operator; the exact solution class of a linear
-feature-ODE is a sum of damped/oscillatory exponentials. The exponential basis is exact on
-that class, where any polynomial diverges under extrapolation — so it degrades much more
-gracefully as the cache interval grows.
+Honest, family-conditional pitch. We benchmarked both bases across two diffusion
+families, and **no single basis wins**:
+
+- On **flow-matching 3D generators** the exponential basis wins clearly and the lead
+  grows with the cache interval (numbers below). This is the regime this calibrator is
+  for.
+- On **DiT-class denoising** (DiT-XL/2 ImageNet-256, 250-step DDPM) the ranking inverts:
+  the sign-correct TaylorSeer polynomial is near-lossless (paired-noise FID drift 2.27 vs
+  the uncached baseline at 3.81x), while the exponential basis drifts 1.7-1.9x more than
+  even a near-reuse Hermite control at every interval tested. We therefore do **not**
+  claim DMD as a better default; it is an additional basis for the workloads where it
+  wins, default behavior unchanged.
+
+The mechanism behind the 3D win: across denoising steps each cached feature stream
+evolves under a slowly varying, near-linear operator; the exact solution class of a
+linear feature-ODE is a sum of damped/oscillatory exponentials, and the exponential basis
+is exact on that class where any polynomial diverges under extrapolation. Whether a given
+model family's stream is in that class at the served horizons is empirical, hence the
+per-family numbers below.
 
 It plugs into the existing `CalibratorConfig` pattern, exactly like
 `TaylorSeerCalibratorConfig`:
@@ -30,6 +41,13 @@ cache_dit.enable_cache(
 )
 ```
 
+The reference implementation
+([hicache-plus-plus](https://github.com/Archerkattri/hicache-plus-plus)) also ships a
+training-free holdout selector (`backend="auto"`) that backcasts a held-out snapshot with
+both bases per compute window and serves the winner, which is the recommended way to
+consume a second basis given the domain split; happy to contribute that as a follow-up
+calibrator if there is interest. This PR keeps the surface minimal: one new basis.
+
 ## What the calibrator does (math summary)
 
 At each full-compute step the calibrator records the computed tensor as a snapshot
@@ -37,26 +55,27 @@ At each full-compute step the calibrator records the computed tensor as a snapsh
 
 1. takes the longest **uniformly spaced** suffix of the snapshot history (the identified
    propagator advances exactly one snapshot-spacing per application, and DBCache's dynamic
-   decisions can make the compute cadence non-uniform — mixed spacings would corrupt the
+   decisions can make the compute cadence non-uniform; mixed spacings would corrupt the
    fit);
-2. identifies the linear propagator `A` with `Y_{t+1} ≈ A Y_t` via one economy SVD of the
-   `[d, n]` snapshot matrix (`n` = history ≤ 6, so this is cheap relative to a forward
+2. identifies the linear propagator `A` with `Y_{t+1} ~ A Y_t` via one economy SVD of the
+   `[d, n]` snapshot matrix (`n` = history <= 6, so this is cheap relative to a forward
    pass) with spectrum-based rank truncation (this is what rejects noise);
-3. eigendecomposes once and forecasts the (fractional) horizon `k` by eigenvalue powers:
-   `Y_{t+k} ≈ Φ (λ^k ⊙ b)`, `b = Φ⁺ Y_t`.
+3. eigendecomposes once per compute window (cached; refit only when a new snapshot
+   arrives) and forecasts the (fractional) horizon `k` by eigenvalue powers:
+   `Y_{t+k} ~ Phi (lambda^k * b)`, `b = pinv(Phi) Y_t`.
 
 Below the 4-snapshot identifiability floor (a real-valued trajectory spends two real
 degrees of freedom per complex pole, so one oscillatory mode already needs three snapshot
 pairs), or whenever the fit is degenerate/non-finite, it transparently falls back to the
-TaylorSeer expansion it also maintains — warm-up behaves exactly like the existing
+TaylorSeer expansion it also maintains; warm-up behaves exactly like the existing
 calibrator.
 
 ## Changes
 
-- `caching/cache_contexts/calibrators/dmd.py` — new: `DMDCalibrator` + `DMDState`,
+- `caching/cache_contexts/calibrators/dmd.py`: new `DMDCalibrator` + `DMDState`,
   mirroring the `TaylorSeerCalibrator` / `TaylorSeerState` API (`mark_step_begin`,
   `update`, `approximate`, `step`, `reset_cache`; per-stream states keyed by name).
-- `caching/cache_contexts/calibrators/__init__.py` — new `DMDCalibratorConfig`
+- `caching/cache_contexts/calibrators/__init__.py`: new `DMDCalibratorConfig`
   dataclass (`dmd_history`, `dmd_rank`, `dmd_ridge`), registered in the `Calibrator`
   factory and `_supported_calibrators`.
 - Export chain: `DMDCalibratorConfig` re-exported from `cache_contexts`, `caching`, and
@@ -70,17 +89,23 @@ selected.
 - Unit-level: on synthetic trajectories from the exponential solution class, the
   calibrator's post-warm-up forecast error is ~5e-8 relative L2 where the order-1 Taylor
   expansion sits at ~0.4-1.9 (same snapshots, same schedule).
-- Method-level (standalone implementation of the same forecaster,
-  [hicache-plus-plus](https://github.com/Archerkattri/hicache-plus-plus)): on
-  Hunyuan3D-2.1 the Hermite/Taylor polynomial basis decays 0.88 → 0.74 → 0.38 F-score at
-  cache interval 3/5/6 while the exponential basis holds 0.85 → 0.86 → 0.62
-  (baseline 0.91); on SAM3D it stays geometry-lossless (F1 = 1.000) to interval 6.
-- **Placeholder:** DiT-XL/2 ImageNet-256 FID-50k / IS vs latency table (Taylor vs
-  exponential at matched intervals) is in progress at
-  `hicache-plus-plus/benchmarks/dit_imagenet/` and will be added here, plus a FLUX.1-dev
-  A/B with this exact calibrator, before marking the PR ready for review.
+- Method-level (reference implementation,
+  [hicache-plus-plus](https://github.com/Archerkattri/hicache-plus-plus)), flow-matching
+  3D generators: on Hunyuan3D-2.1 (Toys4K, F-score@0.05 vs uncached baseline 0.911) the
+  deployed polynomial arm decays 0.88 / 0.74 / 0.38 at cache interval 3 / 5 / 6 while the
+  exponential basis holds 0.85 / 0.86 / 0.62; exactly lossless at interval 5 on
+  Hunyuan3D-2-mini; on SAM3D geometry-lossless (F1 = 1.000) through interval 6 at 1.56x.
+- DiT-class denoising, reported for honesty (the regime where you should NOT pick this
+  calibrator): DiT-XL/2 ImageNet-256 paired-noise FID-10k drift at interval 4/6/8 is
+  18.02 / 54.24 / 100.65 for the exponential basis vs 2.27 for the corrected TaylorSeer
+  at interval 4. Ledger:
+  `hicache-plus-plus/benchmarks/dit_imagenet/RESULTS_DIT.md`.
+- **Placeholder:** the final DiT table (corrected-Hermite cells, holdout-selector A/B,
+  GPU re-timing, FID-50k trio) is queued at `hicache-plus-plus/benchmarks/dit_imagenet/`
+  and will be inlined here, plus a FLUX.1-dev A/B with this exact calibrator, before the
+  PR is marked ready for review.
 
-Honest scoping: the exponential basis is not uniformly better at *small* intervals — at
-interval 3 the polynomial can edge it out. Its value is the graceful degradation at the
-larger intervals users actually want for speed; the head-to-head tables above are reported
-per interval so reviewers can judge that trade-off directly.
+Scoping summary for reviewers: this adds an opt-in basis that wins on flow-matching
+generators and is reported, with numbers, as losing on DiT-class denoising. The
+per-interval tables are included so the trade-off is judged directly, not from a single
+operating point.

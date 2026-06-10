@@ -61,9 +61,22 @@ vs-baseline column is differential, so the ladder ordering is meaningful at 10k.
 baseline ≈ 0 confirms trajectories are exactly noise-paired across separate processes —
 any nonzero FID in Phase 1 is genuine cache-induced drift, not an RNG floor.
 
-## Phase 1 — FID-10k ladder
+## Phase 1 — FID-10k ladder (in progress)
 
-PENDING
+| cell | compute / steps | ms/img | speedup | FID↓ vs baseline | FID↓ vs ImageNet-10k ref |
+|---|---:|---:|---:|---:|---:|
+| baseline | 250/250 | 1791 | 1.00× | 0.00 | 8.89 |
+| hermite_i4 (HiCache) | 65/250 | 445 | 4.02× | 10.57 | 15.09 |
+| dmd_i4 (HiCache++) | 65/250 | 566 | 3.17× | 18.02 | 21.47 |
+| auto_i4 (HiCache++ auto) | 65/250 | 766 | 2.34× | 18.08 | 21.54 |
+| hermite_i6 (HiCache) | 45/250 | 309 | 5.80× | 28.06 | 31.06 |
+| dmd_i6 (HiCache++) | 45/250 | 434 | 4.13× | 54.24 | 55.57 |
+| hermite_i8 (HiCache) | 34/250 | 234 | 7.66× | 57.79 | 59.73 |
+
+Note on the absolute column: published DiT-XL/2 cfg-1.5 FID-50k is 2.27 under the ADM
+TF evaluator with the full reference; 8.89 here reflects N=10k-vs-10k estimator bias,
+the 10k reference, and the pytorch_fid extractor — consistent across all cells, so
+within-table comparisons remain valid.
 
 ## Phase 2 — FID-50k headline trio
 

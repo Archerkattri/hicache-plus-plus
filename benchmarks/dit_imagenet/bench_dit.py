@@ -34,13 +34,18 @@ from hicache_pp.dmd import dmd_update_snapshots, dmd_forecast_state, auto_foreca
 
 def taylor_forecast(state):
     """TaylorSeer monomial forecast from the same backward finite differences HiCache uses:
-    F_hat = F_t + sum_i (Delta^i F_t / i!) * (-k)^i  (the un-scaled, un-damped Hermite limit)."""
+    F_hat = F_t + sum_i (Delta^i F_t / i!) * k^i  (the un-scaled, un-damped Hermite limit)."""
     deriv = state["derivatives"]
     k = state["step"] - state["activated_steps"][-1]
     out = deriv[0].clone()
     o = 1
     while o in deriv:
-        out = out + deriv[o] / math.factorial(o) * float(-k) ** o
+        # Sign-convention fix (2026-06-10): evaluate at +k, not -k. The finite
+        # differences are forward slopes, so forecasting k steps PAST the newest
+        # anchor must use distance +k (upstream TaylorSeer's convention); (-k)**o
+        # flips every odd-order term and extrapolates backwards. Any taylor cell
+        # generated before this fix is an anti-TaylorSeer measurement.
+        out = out + deriv[o] / math.factorial(o) * float(k) ** o
         o += 1
     return out
 

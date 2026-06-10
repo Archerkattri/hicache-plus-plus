@@ -150,15 +150,20 @@ feature-ODE class — three forecast bases, rel. L2 error (↓):
 | **HiCache++ (exponential)** | **4.7e-9** | **1.4e-8** | **5.3e-8** | **1.2e-7** | **2.2e-7** |
 
 The exponential basis is **exact** (~1e-8, flat in `H`); the polynomial **diverges**, and the
-rational (Padé / FoCa) improves on it but still diverges — 6-to-9 orders of magnitude behind the
+rational (Padé / FoCa) improves on it but still diverges, 6-to-9 orders of magnitude behind the
 exponential, and under noise the rational basis turns fragile (Froissart poles). That gap *is*
-the skip ceiling. And when the dynamics are NOT clean — an abrupt regime switch inside the
-cached window, where a whole-window exponential fit misfits — the holdout-selected
-`backend="auto"` catches it every time (it backcasts the newest snapshot with both bases and
+the skip ceiling. And when the dynamics are NOT clean, e.g. an abrupt regime switch inside the
+cached window where a whole-window exponential fit misfits, the holdout-selected
+`backend="auto"` catches it every time (it backcasts a held-out snapshot with both arms and
 serves the winner): on the switch stress it picks the safe fallback in 120/120 windows and cuts
-the long-horizon error ~3x vs a forced exponential fit (H=8: 3.1 vs 9.4 rel. error, with the
-polynomial at 106), while on clean/drifting/noisy trajectories it picks the exponential basis
-120/120 and matches it exactly. Full five-scenario tables:
+the long-horizon error ~6x vs a forced exponential fit (H=8: 1.56 vs 9.40 rel. error, with the
+plain polynomial at 106), while on clean/drifting/noisy trajectories it picks the exponential
+basis 120/120 and matches it exactly. Two selection tests ship: the default 1-gap backcast
+(`holdout="1step"`) and an opt-in distance-matched test (`holdout="horizon"`) that backcasts at
+the actual skip distance of the window against the served Hermite arm; horizon-matching picks
+correctly on trajectories whose 1-gap ranking inverts at the served distance (the
+oscillatory-with-trend regime in the tables) but is higher-variance elsewhere, so it stays
+opt-in. Full six-scenario tables for both modes:
 [`benchmarks/MICROBENCH_RESULTS.md`](benchmarks/MICROBENCH_RESULTS.md). Reproduce:
 `python benchmarks/forecast_microbench.py`.
 
@@ -176,11 +181,15 @@ polynomial at 106), while on clean/drifting/noisy trajectories it picks the expo
 > in [`benchmarks/dit_imagenet/RESULTS_DIT.md`](benchmarks/dit_imagenet/RESULTS_DIT.md)
 > were measured with the as-released (buggy) Hermite and await re-measurement on GPU.
 
-### DiT-XL/2 ImageNet — FID-50k / IS vs latency
+### DiT-XL/2 ImageNet: FID vs latency
 
-*In progress* — the class-conditional ImageNet-256 sweep (FID-50k + Inception Score across
-intervals, Hermite vs exponential) is running in [`benchmarks/dit_imagenet/`](benchmarks/dit_imagenet/);
-the table and Pareto plot land here.
+*In progress.* The Phase-1 FID-10k ladder (paired-noise protocol, 250-step DDPM, cfg 1.5) is
+partially banked in [`benchmarks/dit_imagenet/RESULTS_DIT.md`](benchmarks/dit_imagenet/RESULTS_DIT.md).
+Honest status: the `hermite` and `auto` cells there were measured BEFORE the sign-convention
+fix (see note above) and the `dmd`/`auto` latency columns predate the eigendecomposition
+cache, so the hermite/auto re-runs, the remaining cells (taylor_i4, dmd_i8), the re-timing,
+and the FID-50k headline trio all await the GPU resume; the table and Pareto plot land here
+after that.
 
 ### Hunyuan3D-2.1 (flat DiT velocities) — Toys4K F-score@0.05
 
@@ -245,8 +254,11 @@ Adaptive-CFG). Backends:
 
 - `backend="hermite"` — the published HiCache scaled-Hermite polynomial (clean reimplementation).
 - `backend="dmd"` — the HiCache++ Dynamic Mode Decomposition (Prony) exponential basis.
-- `backend="auto"` — holdout selection: per compute step, backcast the newest held-out
-  snapshot with both bases and serve whichever demonstrably wins on the data at hand.
+- `backend="auto"`: holdout selection. Per compute step, backcast a held-out snapshot
+  with both arms and serve whichever demonstrably wins on the data at hand
+  (`holdout="1step"` default; `holdout="horizon"` opt-in distance-matched test, see
+  [`benchmarks/MICROBENCH_RESULTS.md`](benchmarks/MICROBENCH_RESULTS.md) for the evidence
+  and the decision).
 
 See [`integrations/`](integrations/) for the exact wiring into Hunyuan3D-2.1,
 Hunyuan3D-2-mini, SAM3D and Fast-SAM3D, and
@@ -262,16 +274,21 @@ and **Cache4Diffusion** in each project's native conventions.
   `history` is the snapshot window (5–6); needs ≥4 *uniformly-spaced* snapshots before it
   engages (Hermite covers warm-up automatically).
 - `first_enhance` always computes the first few steps (high curvature); keep it ≥ 3.
+- The DMD eigendecomposition is cached per compute window (refit exactly when a new
+  snapshot arrives), so the per-skip forecast cost is one `Phi @ (lambda**k * b)`;
+  2.5-3.1x per-forecast vs fit-per-call on CPU (`benchmarks/eigencache_timing.py`).
+  GPU numbers for the DiT cells await re-measurement.
 
 ---
 
 ## Tests
 
 ```bash
-python -m hicache_pp.hermite     # Hermite basis + schedule (CPU, no GPU/model)
-python -m hicache_pp.dmd         # exponential basis exact-on-exponential + ≥4-snapshot floor
-python -m hicache_pp.tree        # tree-aware Hermite + exponential + Adaptive-CFG
-python tests/run_tests.py        # all of the above
+python -m hicache_pp.hermite     # Hermite basis + schedule + sign-convention regressions
+python -m hicache_pp.dmd         # exponential basis + auto holdout modes + eigencache
+python -m hicache_pp.tree        # tree-aware Hermite + exponential + Adaptive-CFG + eigencache
+python tests/run_tests.py        # all of the above + DiT-harness tests (taylor sign,
+                                 # FID checkpoint/resume); also pytest-discoverable
 ```
 
 ---

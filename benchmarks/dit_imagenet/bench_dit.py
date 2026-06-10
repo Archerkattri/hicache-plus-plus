@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.join(REPO, "..", "DiT"))       # DiT model code
 
 from hicache_pp.hermite import (hicache_init, hicache_decide, hicache_update_derivatives,  # noqa: E402
                                 hicache_forecast, scaled_hermite)
-from hicache_pp.dmd import dmd_update_snapshots, dmd_forecast_state                        # noqa: E402
+from hicache_pp.dmd import dmd_update_snapshots, dmd_forecast_state, auto_forecast_state                        # noqa: E402
 
 
 def taylor_forecast(state):
@@ -59,7 +59,7 @@ class CachedCFG:
         self.state = hicache_init(num_steps=self.p["num_steps"], interval=max(1, self.p["interval"]),
                                   max_order=self.p["order"], first_enhance=self.p["first_enhance"],
                                   sigma=self.p["sigma"],
-                                  backend="dmd" if self.method == "dmd" else "hermite")
+                                  backend={"dmd": "dmd", "auto": "auto"}.get(self.method, "hermite"))
         self.state["history"] = self.p["history"]
         self.state["step"] = 0
         self.compute_calls = 0
@@ -70,8 +70,10 @@ class CachedCFG:
             return self.model.forward_with_cfg(x, t, **kw)
         decision = hicache_decide(self.state)                      # also logs compute steps
         if decision == "forecast":
-            if self.method == "dmd":
-                out = dmd_forecast_state(self.state)
+            if self.method in ("dmd", "auto"):
+                out = (auto_forecast_state(self.state)
+                       if self.state.get("backend") == "auto"
+                       else dmd_forecast_state(self.state))
             elif self.method == "taylor":
                 out = taylor_forecast(self.state)
             else:
@@ -81,7 +83,7 @@ class CachedCFG:
         out = self.model.forward_with_cfg(x, t, **kw)
         self.compute_calls += 1
         hicache_update_derivatives(self.state, out.detach())
-        if self.method == "dmd":
+        if self.method in ("dmd", "auto"):
             dmd_update_snapshots(self.state, out.detach(), self.state["history"])
         self.state["step"] += 1
         return out
@@ -89,7 +91,7 @@ class CachedCFG:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--method", required=True, choices=["none", "taylor", "hermite", "dmd"])
+    ap.add_argument("--method", required=True, choices=["none", "taylor", "hermite", "dmd", "auto"])
     ap.add_argument("--interval", type=int, default=3)
     ap.add_argument("--n", type=int, default=10000, help="number of samples")
     ap.add_argument("--batch", type=int, default=64)

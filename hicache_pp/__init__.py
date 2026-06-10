@@ -34,4 +34,4 @@ __all__ = [
     "physicists_hermite", "scaled_hermite",
     "dmd_forecast", "dmd_update_snapshots", "dmd_forecast_state", "auto_forecast_state",
 ]
-__version__ = "0.1.0"
+__version__ = "1.1.0"

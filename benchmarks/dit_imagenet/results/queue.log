@@ -1,0 +1,39 @@
+=== PHASE 0: control N=512 (paired-noise validity) ===
+/home/krishi/workspace/gaussianfeels/gim_env/lib/python3.11/site-packages/huggingface_hub/utils/_validators.py:205: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
+  warnings.warn(
+  baseline: 512/512  (1814 ms/img, 250/250 compute)
+[done] baseline: 1814.5 ms/img, 250/250 compute calls -> /home/krishi/workspace/gaussianfeels/third_party/hicache-plus-plus/benchmarks/dit_imagenet/results/control/baseline.npz
+/home/krishi/workspace/gaussianfeels/gim_env/lib/python3.11/site-packages/huggingface_hub/utils/_validators.py:205: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
+  warnings.warn(
+  hermite_i1: 512/512  (1817 ms/img, 250/250 compute)
+[done] hermite_i1: 1816.8 ms/img, 250/250 compute calls -> /home/krishi/workspace/gaussianfeels/third_party/hicache-plus-plus/benchmarks/dit_imagenet/results/control/hermite_i1.npz
+| cell | compute / steps | ms/img | speedup | FID↓ vs baseline |
+|---|---:|---:|---:|---:|
+| baseline | 250/250 | 1814 | 1.00× | 0.00 |
+| hermite_i1 | 250/250 | 1817 | 1.00× | -0.00 |
+=== PHASE 1: FID-10k ladder ===
+/home/krishi/workspace/gaussianfeels/gim_env/lib/python3.11/site-packages/huggingface_hub/utils/_validators.py:205: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
+  warnings.warn(
+  baseline: 512/10000  (1814 ms/img, 250/250 compute)
+=== PHASE 0: control N=512 (paired-noise validity) ===
+[skip] baseline exists
+[skip] hermite_i1 exists
+| cell | compute / steps | ms/img | speedup | FID↓ vs baseline |
+|---|---:|---:|---:|---:|
+| baseline | 250/250 | 1814 | 1.00× | 0.00 |
+| hermite_i1 | 250/250 | 1817 | 1.00× | -0.00 |
+=== PHASE 1: FID-10k ladder ===
+/home/krishi/workspace/gaussianfeels/gim_env/lib/python3.11/site-packages/huggingface_hub/utils/_validators.py:205: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
+  warnings.warn(
+  baseline: 512/10000  (1815 ms/img, 250/250 compute)
+  baseline: 1024/10000  (1815 ms/img, 250/250 compute)
+  baseline: 1536/10000  (1815 ms/img, 250/250 compute)
+  baseline: 2048/10000  (1815 ms/img, 250/250 compute)
+  baseline: 2560/10000  (1815 ms/img, 250/250 compute)
+  baseline: 3072/10000  (1815 ms/img, 250/250 compute)
+  baseline: 3584/10000  (1814 ms/img, 250/250 compute)
+  baseline: 4096/10000  (1815 ms/img, 250/250 compute)
+  baseline: 4608/10000  (1815 ms/img, 250/250 compute)
+  baseline: 5120/10000  (1815 ms/img, 250/250 compute)
+  baseline: 5632/10000  (1814 ms/img, 250/250 compute)
+  baseline: 6144/10000  (1814 ms/img, 250/250 compute)

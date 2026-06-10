@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use HiCache++, please cite it as below."
+title: "HiCache++: exponential (Dynamic-Mode-Decomposition) feature forecasting for training-free diffusion acceleration"
+type: software
+authors:
+  - family-names: Attri
+    given-names: Krishi
+    email: krishiattriwork@gmail.com
+repository-code: "https://github.com/Archerkattri/hicache-plus-plus"
+license: MIT
+version: "1.1.0"
+doi: 10.5281/zenodo.20618824

@@ -9,6 +9,7 @@ Dynamic Mode Decomposition (Prony) *exponential* basis instead of a polynomial â
 same schedule, same API, near-lossless at wider skip intervals.**
 
 [![PyPI](https://img.shields.io/pypi/v/hicache-pp)](https://pypi.org/project/hicache-pp/)
+[![DOI](https://zenodo.org/badge/1260475033.svg)](https://doi.org/10.5281/zenodo.20618824)
 &nbsp;[![License](https://img.shields.io/badge/license-MIT-2e6db0.svg)](LICENSE)
 &nbsp;[![Python](https://img.shields.io/badge/python-%E2%89%A53.9-3776ab.svg)](pyproject.toml)
 &nbsp;[![arXiv](https://img.shields.io/badge/arXiv-2508.16984-b31b1b.svg)](https://arxiv.org/abs/2508.16984)

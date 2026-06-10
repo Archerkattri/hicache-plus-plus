@@ -46,8 +46,11 @@ where it wins, without touching the default.
 The reference implementation
 ([hicache-plus-plus](https://github.com/Archerkattri/hicache-plus-plus)) also ships a
 training-free per-window holdout selector that backcasts a held-out snapshot with both
-bases and serves the winner; given the domain split that selector is the natural follow-up
-to this PR if maintainers want it, but this PR keeps the surface to one config field.
+bases and serves the winner. We tested it on this exact split and report the honest
+verdict: it solves intra-run regime switches but does not recover the family-level
+winner on DiT (both holdout modes serve the exponential arm there), so the per-family
+default in this PR's docstring, not a selector, is the recommendation. This PR keeps the
+surface to one config field.
 
 ## Math summary
 
@@ -94,12 +97,24 @@ behave exactly like current `main`.
   interval 5 on Hunyuan3D-2-mini; geometry-lossless (F1 = 1.000) to interval 6 on SAM3D
   at 1.56x.
 - DiT-class denoising, included for honesty (where the polynomial should stay the
-  choice): DiT-XL/2 ImageNet-256 paired-noise FID-10k drift, exponential 18.02 / 54.24 /
-  100.65 at interval 4/6/8 vs corrected Taylor 2.27 at interval 4. Full ledger:
-  `hicache-plus-plus/benchmarks/dit_imagenet/RESULTS_DIT.md`.
-- **Placeholder:** the final DiT table (corrected-Hermite cells, selector A/B, GPU
-  re-timing, FID-50k trio) plus FLUX.1-dev side-by-side images with this exact hook will
-  be attached before the PR is marked ready for review.
+  choice). DiT-XL/2 ImageNet-256, 250-step DDPM, cfg 1.5, paired-noise FID-10k drift vs
+  the uncached baseline (lossless cache reads ~0; full ledger and protocol:
+  `hicache-plus-plus/benchmarks/dit_imagenet/RESULTS_DIT.md`):
+
+  | basis | i4 | i6 | i8 |
+  |---|---:|---:|---:|
+  | TaylorSeer (corrected, +k) | **2.27** (3.81x) | - | - |
+  | Hermite (corrected, +k) | 3.54 (3.79x) | **6.46** (5.46x) | **10.74** (7.21x) |
+  | exponential (DMD) | 18.02 | 54.24 | 100.65 |
+
+  So the explicit recommendation this PR encodes in its docstring: **polynomial default
+  for DiT-class models; `basis="dmd"` for flow-matching generators**. A holdout selector
+  cannot substitute for that choice: in our pre-registered A/B both holdout modes of the
+  reference selector served the exponential arm on DiT (FID drift 18.11 vs the corrected
+  polynomial's 3.54), because the richer exponential fit backcasts the snapshot history
+  better even where it extrapolates forward worse.
+- Remaining before marking ready for review: FLUX.1-dev side-by-side images generated
+  with this exact hook.
 
 Memory cost: `dmd_history` snapshots per cached stream (vs `max_order + 1` Taylor
 factors), so `use_lite_mode` pairs well with `basis="dmd"`.

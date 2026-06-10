@@ -26,8 +26,11 @@ The pitch is deliberately family-conditional, because our cross-family benchmark
 The reference implementation
 ([hicache-plus-plus](https://github.com/Archerkattri/hicache-plus-plus)) also ships a
 training-free per-window holdout selector (backcast a held-out snapshot with both bases,
-serve the winner) that automates this choice; offered as a follow-up if the maintainers
-want it. This PR keeps the surface to one dispatch switch.
+serve the winner). Tested on this exact split, it does NOT automate the choice: both
+holdout modes served the exponential arm on DiT (FID drift 18.11 vs the corrected
+polynomial's 3.54), so the per-family guidance above (polynomial for DiT-class,
+exponential for flow-matching) is the recommendation, with the selector useful only
+against intra-run regime switches. This PR keeps the surface to one dispatch switch.
 
 Following the framework's spirit of unifying forecast methods, the basis slots in as a
 **per-run switch inside the existing TaylorSeer method** rather than a duplicated method
@@ -90,12 +93,22 @@ maintainers prefer.
   interval, which is the regime this framework's >4-6x speedups live in; exactly lossless
   at interval 5 on Hunyuan3D-2-mini; geometry-lossless (F1 = 1.000) to interval 6 on
   SAM3D.
-- DiT-class denoising, included for honesty (do not flip the switch there): DiT-XL/2
-  ImageNet-256 paired-noise FID-10k drift, exponential 18.02 / 54.24 / 100.65 at interval
-  4/6/8 vs corrected Taylor 2.27 at interval 4. Full ledger:
-  `hicache-plus-plus/benchmarks/dit_imagenet/RESULTS_DIT.md`.
-- **Placeholder:** the final DiT table (corrected-Hermite cells, selector A/B, GPU
-  re-timing, FID-50k trio) plus a FLUX-dev ImageReward/CLIP A/B using this exact patch
-  will be added before the PR is marked ready.
+- DiT-class denoising, included for honesty (do not flip the switch there). DiT-XL/2
+  ImageNet-256, 250-step DDPM, cfg 1.5, paired-noise FID-10k drift vs the uncached
+  baseline (lossless cache reads ~0; full ledger and protocol:
+  `hicache-plus-plus/benchmarks/dit_imagenet/RESULTS_DIT.md`):
+
+  | basis | i4 | i6 | i8 |
+  |---|---:|---:|---:|
+  | TaylorSeer (corrected, +k) | **2.27** (3.81x) | - | - |
+  | Hermite (corrected, +k) | 3.54 (3.79x) | **6.46** (5.46x) | **10.74** (7.21x) |
+  | exponential (DMD) | 18.02 | 54.24 | 100.65 |
+
+  Holdout selection does not substitute for the per-family default: in our
+  pre-registered A/B both holdout modes of the reference selector served the exponential
+  arm on DiT (drift 18.11), because the richer exponential fit backcasts the snapshot
+  history better even where it extrapolates forward worse.
+- Remaining before marking ready: a FLUX-dev ImageReward/CLIP A/B using this exact
+  patch.
 
 Numbers are reported per interval and per family so the trade-off is explicit.

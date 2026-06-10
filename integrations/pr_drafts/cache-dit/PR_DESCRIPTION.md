@@ -44,9 +44,13 @@ cache_dit.enable_cache(
 The reference implementation
 ([hicache-plus-plus](https://github.com/Archerkattri/hicache-plus-plus)) also ships a
 training-free holdout selector (`backend="auto"`) that backcasts a held-out snapshot with
-both bases per compute window and serves the winner, which is the recommended way to
-consume a second basis given the domain split; happy to contribute that as a follow-up
-calibrator if there is interest. This PR keeps the surface minimal: one new basis.
+both bases per compute window and serves the winner. We benchmarked it on this exact
+split and report the honest verdict: it solves intra-run regime switches, but it does
+not recover the family-level winner on DiT (both holdout modes served the exponential
+arm there, FID drift 18.11 vs the corrected polynomial's 3.54), so the recommended way
+to consume this calibrator is a **per-family default** (DMD for flow-matching
+generators; TaylorSeer for DiT-class denoising), not a selector. This PR keeps the
+surface minimal: one new basis.
 
 ## What the calibrator does (math summary)
 
@@ -96,14 +100,22 @@ selected.
   exponential basis holds 0.85 / 0.86 / 0.62; exactly lossless at interval 5 on
   Hunyuan3D-2-mini; on SAM3D geometry-lossless (F1 = 1.000) through interval 6 at 1.56x.
 - DiT-class denoising, reported for honesty (the regime where you should NOT pick this
-  calibrator): DiT-XL/2 ImageNet-256 paired-noise FID-10k drift at interval 4/6/8 is
-  18.02 / 54.24 / 100.65 for the exponential basis vs 2.27 for the corrected TaylorSeer
-  at interval 4. Ledger:
-  `hicache-plus-plus/benchmarks/dit_imagenet/RESULTS_DIT.md`.
-- **Placeholder:** the final DiT table (corrected-Hermite cells, holdout-selector A/B,
-  GPU re-timing, FID-50k trio) is queued at `hicache-plus-plus/benchmarks/dit_imagenet/`
-  and will be inlined here, plus a FLUX.1-dev A/B with this exact calibrator, before the
-  PR is marked ready for review.
+  calibrator). DiT-XL/2 ImageNet-256, 250-step DDPM, cfg 1.5, paired-noise FID-10k drift
+  vs the uncached baseline (lossless cache reads ~0; full ledger and protocol:
+  `hicache-plus-plus/benchmarks/dit_imagenet/RESULTS_DIT.md`):
+
+  | basis | i4 | i6 | i8 |
+  |---|---:|---:|---:|
+  | TaylorSeer (corrected, +k) | **2.27** (3.81x) | - | - |
+  | Hermite (corrected, +k) | 3.54 (3.79x) | **6.46** (5.46x) | **10.74** (7.21x) |
+  | exponential (DMD) | 18.02 | 54.24 | 100.65 |
+
+  Holdout selection does not rescue DiT either: in our pre-registered A/B both holdout
+  modes of the reference selector served the exponential arm (drift 18.11), because the
+  richer exponential fit backcasts the snapshot history better even where it
+  extrapolates forward worse. Hence the per-family default recommendation above.
+- Remaining before marking ready for review: a FLUX.1-dev A/B with this exact
+  calibrator.
 
 Scoping summary for reviewers: this adds an opt-in basis that wins on flow-matching
 generators and is reported, with numbers, as losing on DiT-class denoising. The

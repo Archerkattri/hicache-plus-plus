@@ -6,9 +6,10 @@
 
 **No single forecast basis wins across diffusion families. HiCache++ ships the exponential
 (Dynamic Mode Decomposition / Prony) basis that wins on flow-matching 3D generators, a
-corrected Hermite polynomial baseline, and a training-free holdout selector
-(`backend="auto"`) that picks the winning basis per window, from the data, at zero model
-cost.**
+corrected (sign-fixed) Hermite polynomial that dominates on DiT-class denoising, and a
+training-free holdout selector (`backend="auto"`) that solves regime switches but, per our
+own pre-registered DiT A/B, does NOT solve the domain split. Pick the basis by model
+family; the numbers for both families are below.**
 
 [![PyPI](https://img.shields.io/pypi/v/hicache-pp)](https://pypi.org/project/hicache-pp/)
 [![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.20618824-1682D4.svg)](https://doi.org/10.5281/zenodo.20618824)
@@ -30,21 +31,27 @@ it across two diffusion families, and found the honest answer:
 | workload | winning basis | evidence |
 |---|---|---|
 | **Flow-matching 3D generators** (Hunyuan3D-2.1 / 2-mini, SAM3D, TRELLIS v1/v2) | **exponential (DMD)** | +0.13 / +0.24 F-score over the deployed Hermite arm at intervals 5 / 6 on Hunyuan3D-2.1; exactly lossless at i5 on 2-mini; geometry-lossless (F1 = 1.000) through i6 at 1.56x on SAM3D |
-| **DiT-class denoising** (DiT-XL/2, ImageNet-256, 250-step DDPM) | **polynomial** | corrected TaylorSeer is near-lossless: paired-noise FID drift 2.27 at 3.81x. The exponential basis drifts 1.7-1.9x more than even a near-reuse Hermite control at every interval tested |
+| **DiT-class denoising** (DiT-XL/2, ImageNet-256, 250-step DDPM) | **polynomial** | corrected TaylorSeer is near-lossless (paired-noise FID drift 2.27 at 3.81x) and the corrected Hermite sweeps the interval ladder (3.54 / 6.46 / 10.74 at i4 / i6 / i8). The exponential basis drifts 5-9x more than the corrected Hermite at every interval tested |
 
-Neither basis transfers. Any single-basis claim you have read (including our own earlier
-framing) is family-conditional. The product of this repo is therefore the **selector**:
+Neither basis transfers, and on the Pareto front each family is owned outright: corrected
+TaylorSeer / Hermite dominate DiT at every interval, DMD dominates the flow-matching 3D
+family at every interval past i3. Any single-basis claim you have read (including our own
+earlier framing) is family-conditional.
 
-```python
-state = hicache_init(num_steps=N, interval=5, first_enhance=4, backend="auto", history=6)
-```
+**The selection verdict, stated plainly.** We built a training-free selector
+(`backend="auto"`) that backcasts a held-out snapshot with both bases per compute window
+and serves the winner, in two modes (1-step and horizon-matched backcast). It is exact on
+synthetic regime switches (120/120), harmless on the 3D generators, and **wrong on DiT in
+both modes**: auto reads FID drift 18.11 in the pre-registered A/B (both modes,
+identical) where the corrected Hermite sits at 3.54. The reason is characterized below:
+on DiT's real features DMD's richer parameterization fits and backcasts the snapshot
+history better while extrapolating forward worse, so in-window backcast fit carries no
+signal about forward quality. Therefore:
 
-`backend="auto"` backcasts a held-out snapshot with both bases at every compute step and
-serves whichever demonstrably wins on the trajectory at hand. The held-out snapshot is one
-the schedule already paid for, so selection costs no extra model calls. Two holdout modes
-ship: the default 1-gap backcast (`holdout="1step"`) and an opt-in distance-matched test
-(`holdout="horizon"`), added after we caught the 1-step test failing in the wild on DiT
-(details below).
+- **Pick the basis by model family** (the table above). That is the recommendation.
+- Use `backend="auto"` only as a safety net for intra-run regime switches, which it
+  demonstrably solves; do not expect it to discover the family-level winner.
+- Per-window basis selection from real feature trajectories is an **open problem**.
 
 ## Quickstart
 
@@ -53,7 +60,9 @@ import torch
 from hicache_pp import hicache_init, hicache_decide, hicache_update_derivatives
 from hicache_pp import dmd_update_snapshots, dmd_forecast_state
 
-state = hicache_init(num_steps=N, interval=5, first_enhance=4, backend="auto", history=6)
+# backend: pick by model family -- "dmd" for flow-matching 3D generators,
+# "hermite" for DiT-class denoising, "auto" only as a regime-switch safety net.
+state = hicache_init(num_steps=N, interval=5, first_enhance=4, backend="dmd", history=6)
 for i, t in enumerate(timesteps):
     if hicache_decide(state) == "forecast":
         v = dmd_forecast_state(state)            # skip the network, forecast the velocity
@@ -67,8 +76,9 @@ for i, t in enumerate(timesteps):
 
 If you already run TaylorSeer or HiCache this is a basis swap, not a new pipeline: the
 compute/skip schedule, warm-up and API stay identical. Only the per-skip forecast formula
-changes. Backends: `"hermite"` (corrected HiCache polynomial), `"dmd"` (exponential),
-`"auto"` (holdout selection, recommended).
+changes. Backends: `"hermite"` (corrected HiCache polynomial; pick this for DiT-class
+denoising), `"dmd"` (exponential; pick this for flow-matching 3D generators), `"auto"`
+(holdout selection; regime-switch safety net, see the verdict above).
 
 > **Name note.** *HiCache* here refers to the diffusion **feature-forecasting** method
 > (Hermite polynomial feature caching, [arXiv:2508.16984](https://arxiv.org/abs/2508.16984)),
@@ -108,7 +118,10 @@ the horizons actually served is an empirical question per family. On flow-matchi
 velocity streams it is (the exponential basis wins). On the 250-step DDPM DiT stream it is
 not: the stream is locally so smooth that low-order polynomial truncation error is
 negligible at the served horizons, while the exponential fit pays pole-estimation error
-that compounds with the horizon. That is the domain split, and it is why `auto` exists.
+that compounds with the horizon. That is the domain split. And note that holdout
+selection cannot see it from inside the window: DMD fits (and therefore backcasts) the
+snapshot history better on DiT even while extrapolating forward worse, which is exactly
+why `auto` picks the wrong arm there and why the family default is the recommendation.
 
 ---
 
@@ -190,42 +203,53 @@ Full tables: [`results/RESULTS.md`](results/RESULTS.md).
 
 Paired-noise FID-10k ladder, 250-step DDPM, cfg 1.5: the per-step noise is re-seeded
 identically across cells, so FID vs the uncached baseline measures pure cache-induced
-drift (a lossless cache reads ~0; the interval-1 control reads -0.00). Full protocol and
-ledger: [`benchmarks/dit_imagenet/RESULTS_DIT.md`](benchmarks/dit_imagenet/RESULTS_DIT.md).
+drift (a lossless cache reads ~0; the interval-1 control reads -0.00). The ladder is
+COMPLETE: both eras are labeled ("as released" = the pre-sign-fix near-reuse Hermite and
+the auto cell measured alongside it; "corrected" = sign-fixed +k re-runs). FID values are
+from the 10k runs; latencies marked \* were re-timed post-eigencache at n=512 because
+their FID runs predate the per-window eigendecomposition cache. Full protocol and ledger:
+[`benchmarks/dit_imagenet/RESULTS_DIT.md`](benchmarks/dit_imagenet/RESULTS_DIT.md).
 
-| cell | speedup | FID drift vs baseline (as released) | FID drift (corrected) | FID vs ImageNet-10k ref |
+| cell | speedup | FID drift (as released) | FID drift (corrected) | FID vs ImageNet-10k ref |
 |---|---:|---:|---:|---:|
 | baseline | 1.00x | 0.00 | 0.00 | 8.89 |
 | taylor_i4 (TaylorSeer, +k) | 3.81x | n/a | **2.27** | 8.95 |
-| hermite_i4 (HiCache) | 4.02x | 10.57 | *pending* | 15.09 |
-| dmd_i4 (HiCache++) | 3.17x | 18.02 | 18.02 | 21.47 |
-| auto_i4 (1-step holdout) | 2.34x | 18.08 | *pending* | 21.54 |
-| auto_i4 (horizon holdout) | *pending* | *pending* | *pending* | *pending* |
-| hermite_i6 | 5.80x | 28.06 | *pending* | 31.06 |
-| dmd_i6 | 4.13x | 54.24 | 54.24 | 55.57 |
-| hermite_i8 | 7.66x | 57.79 | *pending* | 59.73 |
+| hermite_i4 (HiCache, +k) | 3.79x | 10.57 | **3.54** | 9.60 |
+| dmd_i4 (HiCache++) | 3.71x\* | 18.02 | 18.02 | 21.47 |
+| auto_i4 (1-step holdout) | 2.59x\* | 18.08 | 18.11 | 21.57 |
+| auto_i4 (horizon holdout) | 2.59x\* | n/a | 18.11 | 21.57 |
+| hermite_i6 (+k) | 5.46x | 28.06 | **6.46** | 11.61 |
+| dmd_i6 | 5.31x\* | 54.24 | 54.24 | 55.57 |
+| hermite_i8 (+k) | 7.21x | 57.79 | **10.74** | 15.10 |
 | dmd_i8 | 6.98x | 100.65 | 100.65 | 100.99 |
+
+(Speedup shown for the corrected run where one exists; the as-released hermite cells ran
+at 4.02x / 5.80x / 7.66x. Absolute FID for as-released hermite/auto cells: 15.09 / 31.06 /
+59.73 and 21.54.)
 
 What this table says, honestly:
 
 1. **Polynomial forecasting is near-lossless on DiT.** The sign-correct TaylorSeer cell
-   drifts 2.27 FID at 3.81x (absolute 8.95 vs the baseline's 8.89). On this workload the
-   basis ladder has almost nothing left to win.
-2. **The exponential basis loses here at every interval**, by 1.7-1.9x drift vs even the
-   as-released (near-reuse) Hermite control. Do not deploy `backend="dmd"` on DiT-class
-   denoising; use `"auto"` or the polynomial.
-3. **The 1-step holdout failed in the wild on this workload**: `auto_i4` tracks DMD
-   (18.08 vs 18.02) because the 1-gap backcast ranked DMD ahead while the multi-step
-   reality favored the polynomial. This motivated `holdout="horizon"`, which backcasts at
-   the actual skip distance: in the controlled regime that reconstructs this inversion it
-   picks the winning arm 20/20 (equal to the oracle) where 1step picks 12/20, but it is
-   higher-variance elsewhere, so it ships opt-in. The DiT horizon A/B cell is queued.
+   drifts 2.27 FID at 3.81x (absolute 8.95 vs the baseline's 8.89), and the corrected
+   Hermite sweeps the ladder: 3.54 / 6.46 / 10.74 at i4 / i6 / i8. The corrected
+   polynomial at i8 (7.2x) drifts less than the as-released one did at i4.
+2. **The exponential basis loses here at every interval**: 1.7-1.9x more drift than even
+   the as-released (near-reuse) control, 5-9x more than the corrected Hermite. Do not
+   deploy `backend="dmd"` on DiT-class denoising; use the polynomial.
+3. **Holdout selection failed in the wild, in BOTH modes.** `auto_i4` tracks DMD (18.11
+   corrected, vs the corrected Hermite's 3.54) because the 1-gap backcast ranks DMD
+   ahead. `holdout="horizon"` (backcast at the actual skip distance), which fixes the
+   reconstructed inversion 20/20 on the microbench, reads 18.11 on DiT, identical: on
+   real DiT features the horizon holdout ALSO serves the DMD arm. The microbench win did
+   not transfer. Why: DMD's richer parameterization fits and backcasts the snapshot
+   history better at any in-window distance while extrapolating forward worse, so
+   backcast fit carries no signal about forward quality there. Recommendation: family
+   defaults (above); `auto` only as a regime-switch safety net; real-feature basis
+   selection = open problem.
 
-*Pending cells* (marked above) fill in from the queued GPU re-run
-(`benchmarks/dit_imagenet/results/queue_resume.sh`): corrected-Hermite i4/i6/i8, corrected
-auto, the horizon-holdout A/B, dmd/auto re-timing with the eigendecomposition cache, and
-the FID-50k headline trio. The conclusions above do not depend on them: they rest on the
-sign-correct TaylorSeer cell and on DMD losing to a weaker control.
+Not run: the FID-50k trio (~40 h GPU; under the paired-noise differential protocol it
+can only tighten an estimator bias that is identical across cells and cancels in the
+drift metric).
 
 > **Sign-convention fix (2026-06-10), and why you should care even if you never use this
 > repo.** Versions up to and including v1.1.0 evaluated the Hermite basis at `x = -k`
@@ -238,7 +262,7 @@ sign-correct TaylorSeer cell and on DMD losing to a weaker control.
 > sigma is the one that mutes it toward reuse). The fixed (+k) Hermite beats reuse in 29
 > of 30 cells, is 1.45-2.47x more accurate than shipped, and keeps sigma = 0.5 optimal.
 > The DMD and `auto`-selection paths were never affected (forward eigenvalue powers, a
-> forward polynomial yardstick). Fixed in `hicache_pp/hermite.py` and `hicache_pp/tree.py`
+> forward polynomial yardstick). Fixed in **v1.2.0** (`hicache_pp/hermite.py` and `hicache_pp/tree.py`)
 > with closed-form directional regression tests (exact extrapolation of a linear series at
 > sigma = sqrt(1/2)); we recommend the same one-line test to every caching codebase. Full
 > shipped-vs-fixed-vs-reuse A/B:
@@ -260,15 +284,17 @@ The one-loop snippet at the top is the whole integration for **flat tensor** vel
 the same API but tree-aware (`hicache_forecast_tree`, `dmd_forecast_tree`, plus tree
 Adaptive-CFG). Backends:
 
-- `backend="auto"` (recommended): holdout selection. Per compute step, backcast a held-out
-  snapshot with both arms and serve whichever demonstrably wins on the data at hand.
-  `holdout="1step"` is the default; `holdout="horizon"` is the opt-in distance-matched
-  test (see [`benchmarks/MICROBENCH_RESULTS.md`](benchmarks/MICROBENCH_RESULTS.md) for the
-  evidence and the pre-registered default decision).
+- `backend="hermite"`: the published HiCache scaled-Hermite polynomial (clean,
+  sign-correct reimplementation). The basis to pick for DiT-class denoising.
 - `backend="dmd"`: the exponential basis. Wins on flow-matching 3D generators; loses on
   DiT-class denoising (see the domain split above).
-- `backend="hermite"`: the published HiCache scaled-Hermite polynomial (clean, sign-correct
-  reimplementation).
+- `backend="auto"`: holdout selection. Per compute step, backcast a held-out snapshot
+  with both arms and serve whichever wins. `holdout="1step"` is the default;
+  `holdout="horizon"` is the opt-in distance-matched test. Solves intra-run regime
+  switches; does NOT recover the family-level winner on DiT (both modes serve the DMD arm
+  there, FID drift 18.11 vs the corrected Hermite's 3.54). Use family defaults first;
+  evidence in [`benchmarks/MICROBENCH_RESULTS.md`](benchmarks/MICROBENCH_RESULTS.md) and
+  [`benchmarks/dit_imagenet/RESULTS_DIT.md`](benchmarks/dit_imagenet/RESULTS_DIT.md).
 
 See [`integrations/`](integrations/) for the exact wiring into Hunyuan3D-2.1,
 Hunyuan3D-2-mini, SAM3D and Fast-SAM3D, and
@@ -278,9 +304,9 @@ and **Cache4Diffusion** in each project's native conventions.
 
 ### Tuning notes
 
-- **Pick the basis by family.** Flow-matching 3D velocity streams: `"dmd"` or `"auto"`,
-  push the interval to i5-i6. DiT-class denoising: polynomial or `"auto"`; do not force
-  `"dmd"`.
+- **Pick the basis by family.** Flow-matching 3D velocity streams: `"dmd"`, push the
+  interval to i5-i6. DiT-class denoising: `"hermite"` (or a plain TaylorSeer); never
+  `"dmd"`, and do not rely on `"auto"` to save you (it serves the DMD arm there).
 - **Hermite**: lossless up to a modest interval (Hunyuan-2.1: i3/order-2). Higher order
   does not rescue bigger intervals.
 - **Exponential**: `history` is the snapshot window (5-6); needs >= 4 *uniformly spaced*
@@ -289,7 +315,8 @@ and **Cache4Diffusion** in each project's native conventions.
 - The DMD eigendecomposition is cached per compute window (refit exactly when a new
   snapshot arrives), so the per-skip forecast cost is one `Phi @ (lambda**k * b)`:
   2.5-3.1x cheaper per forecast than fit-per-call on CPU
-  (`benchmarks/eigencache_timing.py`). GPU re-timing of the DiT cells is queued.
+  (`benchmarks/eigencache_timing.py`). On the DiT GPU re-time it cuts dmd_i4 from 566
+  to 483 ms/img (3.17x -> 3.71x) and dmd_i6 from 434 to 337 ms/img (4.13x -> 5.31x).
 
 ---
 
@@ -300,7 +327,8 @@ python -m hicache_pp.hermite     # Hermite basis + schedule + sign-convention re
 python -m hicache_pp.dmd         # exponential basis + auto holdout modes + eigencache
 python -m hicache_pp.tree        # tree-aware Hermite + exponential + Adaptive-CFG + eigencache
 python tests/run_tests.py        # all of the above + DiT-harness tests (taylor sign,
-                                 # FID checkpoint/resume); also pytest-discoverable
+                                 # FID checkpoint/resume) + version sync; also
+                                 # pytest-discoverable
 ```
 
 ---

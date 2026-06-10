@@ -1,0 +1,49 @@
+=== resume: remaining original cells ===
+/home/krishi/workspace/gaussianfeels/gim_env/lib/python3.11/site-packages/huggingface_hub/utils/_validators.py:205: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
+  warnings.warn(
+  dmd_i8: 512/10000  (254 ms/img, 34/250 compute)
+  dmd_i8: 1024/10000  (255 ms/img, 34/250 compute)
+  dmd_i8: 1536/10000  (255 ms/img, 34/250 compute)
+  dmd_i8: 2048/10000  (255 ms/img, 34/250 compute)
+  dmd_i8: 2560/10000  (255 ms/img, 34/250 compute)
+  dmd_i8: 3072/10000  (255 ms/img, 34/250 compute)
+  dmd_i8: 3584/10000  (256 ms/img, 34/250 compute)
+  dmd_i8: 4096/10000  (256 ms/img, 34/250 compute)
+  dmd_i8: 4608/10000  (256 ms/img, 34/250 compute)
+  dmd_i8: 5120/10000  (256 ms/img, 34/250 compute)
+  dmd_i8: 5632/10000  (256 ms/img, 34/250 compute)
+  dmd_i8: 6144/10000  (256 ms/img, 34/250 compute)
+  dmd_i8: 6656/10000  (256 ms/img, 34/250 compute)
+  dmd_i8: 7168/10000  (256 ms/img, 34/250 compute)
+  dmd_i8: 7680/10000  (256 ms/img, 34/250 compute)
+  dmd_i8: 8192/10000  (256 ms/img, 34/250 compute)
+  dmd_i8: 8704/10000  (256 ms/img, 34/250 compute)
+  dmd_i8: 9216/10000  (256 ms/img, 34/250 compute)
+  dmd_i8: 9728/10000  (256 ms/img, 34/250 compute)
+[done] dmd_i8: 256.4 ms/img, 34/250 compute calls -> /home/krishi/workspace/gaussianfeels/third_party/hicache-plus-plus/benchmarks/dit_imagenet/results/fid10k/dmd_i8.npz
+/home/krishi/workspace/gaussianfeels/gim_env/lib/python3.11/site-packages/huggingface_hub/utils/_validators.py:205: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
+  warnings.warn(
+  taylor_i4: 512/10000  (446 ms/img, 65/250 compute)
+  taylor_i4: 1024/10000  (458 ms/img, 65/250 compute)
+  taylor_i4: 1536/10000  (463 ms/img, 65/250 compute)
+  taylor_i4: 2048/10000  (465 ms/img, 65/250 compute)
+  taylor_i4: 2560/10000  (466 ms/img, 65/250 compute)
+  taylor_i4: 3072/10000  (467 ms/img, 65/250 compute)
+  taylor_i4: 3584/10000  (468 ms/img, 65/250 compute)
+  taylor_i4: 4096/10000  (468 ms/img, 65/250 compute)
+  taylor_i4: 4608/10000  (468 ms/img, 65/250 compute)
+  taylor_i4: 5120/10000  (469 ms/img, 65/250 compute)
+  taylor_i4: 5632/10000  (469 ms/img, 65/250 compute)
+  taylor_i4: 6144/10000  (469 ms/img, 65/250 compute)
+  taylor_i4: 6656/10000  (469 ms/img, 65/250 compute)
+  taylor_i4: 7168/10000  (470 ms/img, 65/250 compute)
+  taylor_i4: 7680/10000  (470 ms/img, 65/250 compute)
+  taylor_i4: 8192/10000  (470 ms/img, 65/250 compute)
+  taylor_i4: 8704/10000  (470 ms/img, 65/250 compute)
+  taylor_i4: 9216/10000  (470 ms/img, 65/250 compute)
+  taylor_i4: 9728/10000  (470 ms/img, 65/250 compute)
+[done] taylor_i4: 470.2 ms/img, 65/250 compute calls -> /home/krishi/workspace/gaussianfeels/third_party/hicache-plus-plus/benchmarks/dit_imagenet/results/fid10k/taylor_i4.npz
+=== sign-fixed re-runs (require signfix.patch applied) ===
+sign fix detected, proceeding
+/home/krishi/workspace/gaussianfeels/gim_env/lib/python3.11/site-packages/huggingface_hub/utils/_validators.py:205: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
+  warnings.warn(

@@ -1,6 +1,7 @@
 # DiT-XL/2 ImageNet-256 FID — credibility-gate benchmark (HiCache++)
 
-**Status: IN PROGRESS** — cells fill in as the queue (`results/queue_all.sh`) completes.
+**Status: Phase 1 (as-released ladder) COMPLETE; Phase 1b (corrected re-run) QUEUED** —
+cells fill in as the queues (`results/queue_all.sh`, `results/queue_resume.sh`) complete.
 Started 2026-06-09.
 
 ## Protocol
@@ -61,7 +62,13 @@ vs-baseline column is differential, so the ladder ordering is meaningful at 10k.
 baseline ≈ 0 confirms trajectories are exactly noise-paired across separate processes —
 any nonzero FID in Phase 1 is genuine cache-induced drift, not an RNG floor.
 
-## Phase 1 — FID-10k ladder (in progress)
+## Phase 1 — FID-10k ladder (COMPLETE — as released)
+
+Provenance note (sign-convention fix, 2026-06-10): the `hermite_*` and `auto_i4` cells
+below were measured with the as-released (−k, anti-extrapolative, near-reuse) Hermite —
+see `benchmarks/MICROBENCH_RESULTS.md` for the bug A/B. The `dmd_*` cells are
+sign-independent and `taylor_i4` was measured post-fix (+k), so those rows are already
+the corrected values. Corrected re-runs of the affected cells are Phase 1b below.
 
 | cell | compute / steps | ms/img | speedup | FID↓ vs baseline | FID↓ vs ImageNet-10k ref |
 |---|---:|---:|---:|---:|---:|
@@ -72,11 +79,49 @@ any nonzero FID in Phase 1 is genuine cache-induced drift, not an RNG floor.
 | hermite_i6 (HiCache) | 45/250 | 309 | 5.80× | 28.06 | 31.06 |
 | dmd_i6 (HiCache++) | 45/250 | 434 | 4.13× | 54.24 | 55.57 |
 | hermite_i8 (HiCache) | 34/250 | 234 | 7.66× | 57.79 | 59.73 |
+| dmd_i8 (HiCache++) | 34/250 | 256 | 6.98× | 100.65 | 100.99 |
+| taylor_i4 (TaylorSeer, +k) | 65/250 | 470 | 3.81× | 2.27 | 8.95 |
 
 Note on the absolute column: published DiT-XL/2 cfg-1.5 FID-50k is 2.27 under the ADM
 TF evaluator with the full reference; 8.89 here reflects N=10k-vs-10k estimator bias,
 the 10k reference, and the pytorch_fid extractor — consistent across all cells, so
 within-table comparisons remain valid.
+
+### Headline reads of Phase 1 (paper §DiT)
+
+1. **Polynomial forecasting is near-lossless on this workload**: corrected TaylorSeer at
+   i4 drifts 2.27 FID at 3.81× (absolute 8.95 vs baseline 8.89).
+2. **The exponential (DMD) basis loses at every interval**, drifting 1.7–1.9× more than
+   even the as-released near-reuse Hermite control (18.02/54.24/100.65 vs
+   10.57/28.06/57.79 at i4/i6/i8).
+3. **The 1-step holdout failed in the wild**: `auto_i4` (18.08) tracked DMD (18.02) while
+   multi-step reality favored the polynomial arm (10.57). This motivated
+   `holdout="horizon"` (Phase 1b A/B cell).
+
+## Phase 1b — corrected re-run + holdout A/B (`results/fid10k_fix/`) — QUEUED
+
+Queue: `results/queue_resume.sh`. Same protocol, code at the sign-fixed HEAD; latency
+columns additionally pick up the per-window eigendecomposition cache (so dmd/auto ms/img
+re-times here too). Placeholders — only numbers change when cells land:
+
+| cell | compute / steps | ms/img | speedup | FID↓ vs baseline | FID↓ vs ImageNet-10k ref |
+|---|---:|---:|---:|---:|---:|
+| hermite_i4_fix (+k) | 65/250 | TBD | TBD | TBD | TBD |
+| hermite_i6_fix (+k) | 45/250 | TBD | TBD | TBD | TBD |
+| hermite_i8_fix (+k) | 34/250 | TBD | TBD | TBD | TBD |
+| auto_i4_fix (1step holdout) | 65/250 | TBD | TBD | TBD | TBD |
+| auto_i4_horizon (horizon holdout) | 65/250 | TBD | TBD | TBD | TBD |
+
+Pre-registered analysis (written before any Phase 1b cell ran):
+
+- The Phase 1 conclusions above do NOT depend on these cells (they rest on the
+  sign-correct taylor_i4 cell and on DMD losing to a *weaker* near-reuse control); the
+  corrected-Hermite cells can shift the quantitative, not the qualitative, ladder.
+- auto_i4_horizon vs auto_i4_fix is the live A/B of the horizon-matched holdout on the
+  workload where the 1-step holdout demonstrably mispredicted; the microbench
+  (oscillatory-with-trend, `benchmarks/MICROBENCH_RESULTS.md`) predicts horizon should
+  track the better (Hermite) arm here.
+- Both Phase-1 and Phase-1b numbers stay published side by side (as released / corrected).
 
 ## Phase 2 — FID-50k headline trio
 

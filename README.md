@@ -162,6 +162,20 @@ polynomial at 106), while on clean/drifting/noisy trajectories it picks the expo
 [`benchmarks/MICROBENCH_RESULTS.md`](benchmarks/MICROBENCH_RESULTS.md). Reproduce:
 `python benchmarks/forecast_microbench.py`.
 
+> **Sign-convention fix (2026-06-10).** Versions up to and including v1.1.0 evaluated the
+> Hermite basis at `x = -k` instead of `x = +k` (`k` = steps past the newest anchor). The bug
+> was ours, introduced in porting; upstream TaylorSeer uses `+k`. Odd-order terms flipped
+> sign, so the shipped Hermite forecast extrapolated backwards and lost to plain reuse on
+> the entire microbench trajectory class. Fixed in `hicache_pp/hermite.py` and
+> `hicache_pp/tree.py` with closed-form regression tests; `sigma = 0.5` remains optimal
+> after the fix, and the DMD/exponential and `auto`-selection paths were never affected
+> (forward eigenvalue powers and a forward polynomial yardstick). The full
+> shipped-vs-fixed-vs-reuse A/B is in
+> [`benchmarks/MICROBENCH_RESULTS.md`](benchmarks/MICROBENCH_RESULTS.md); microbench tables
+> there are labeled as predating or postdating the fix. The DiT FID `hermite`/`auto` cells
+> in [`benchmarks/dit_imagenet/RESULTS_DIT.md`](benchmarks/dit_imagenet/RESULTS_DIT.md)
+> were measured with the as-released (buggy) Hermite and await re-measurement on GPU.
+
 ### DiT-XL/2 ImageNet — FID-50k / IS vs latency
 
 *In progress* — the class-conditional ImageNet-256 sweep (FID-50k + Inception Score across

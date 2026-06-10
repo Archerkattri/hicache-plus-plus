@@ -6,7 +6,7 @@ polynomial** basis instead of evaluating the network, skipping
 ``(interval-1)/interval`` of the forward passes. The dual scaling keeps the
 high-order terms bounded, giving a more stable forecast than the equivalent Taylor
 (monomial) series — TaylorSeer is the special case where the basis is the plain
-monomial ``(-k)^i``.
+monomial ``k^i``.
 
 The basis and finite-difference core are model-agnostic; integrate it by calling
 ``hicache_init`` / ``hicache_decide`` / ``hicache_update_derivatives`` /
@@ -28,14 +28,18 @@ backward finite differences::
 
 At a skipped step ``k`` steps past the last compute step the velocity is::
 
-    F_hat_{t-k} = F_t + sum_{i=1}^{m} (Delta^i F_t / i!) * Htilde_i(-k)
+    F_hat_{t+k} = F_t + sum_{i=1}^{m} (Delta^i F_t / i!) * Htilde_i(k)
 
 with the dual-scaled physicist's Hermite polynomial (contraction ``sigma in (0,1)``)::
 
     Htilde_n(x) = sigma^n * H_n(sigma * x)
     H_0(x) = 1,  H_1(x) = 2x,  H_{n+1}(x) = 2 x H_n(x) - 2 n H_{n-1}(x)
 
-TaylorSeer is the special case where ``Htilde_i(-k)`` is the monomial ``(-k)^i``.
+TaylorSeer is the special case where ``Htilde_i(k)`` is the monomial ``k^i``.
+The basis is evaluated at ``x = +k``: the finite differences are forward slopes on
+increasing step indices, so the forecast ``k`` steps PAST the newest anchor must
+evaluate at ``+k`` (the upstream TaylorSeer convention, distance ``+k``); evaluating
+at ``-k`` extrapolates backwards (odd-order terms flip sign).
 """
 from __future__ import annotations
 
@@ -172,7 +176,7 @@ def hicache_update_derivatives(state: Dict[str, Any], feature: torch.Tensor) -> 
 
 def hicache_forecast(state: Dict[str, Any]) -> torch.Tensor:
     """Scaled-Hermite forecast of the velocity at the current skip step:
-    ``F_hat = F_t + sum_{i>=1} (Delta^i F_t / i!) * Htilde_i(-k)`` where ``k`` is the
+    ``F_hat = F_t + sum_{i>=1} (Delta^i F_t / i!) * Htilde_i(k)`` where ``k`` is the
     number of steps since the last compute step. With <2 anchors this returns the
     cached velocity unchanged (the correct degenerate forecast)."""
     deriv = state["derivatives"]
@@ -182,7 +186,7 @@ def hicache_forecast(state: Dict[str, Any]) -> torch.Tensor:
     k = state["step"] - state["activated_steps"][-1]
     sigma = state["sigma"]
     base = deriv[0]
-    x = torch.tensor(float(-k), dtype=base.dtype, device=base.device)
+    x = torch.tensor(float(k), dtype=base.dtype, device=base.device)
 
     result = base
     order = 1
@@ -228,6 +232,21 @@ if __name__ == "__main__":
     hicache_update_derivatives(st, a + b * float(interval))
     check("finite-diff order-1 == b (exact on linear series)",
           torch.allclose(st["derivatives"][1], b))
+
+    # sign-convention regression: the forecast must extrapolate FORWARD.
+    # Htilde_1(k) = 2*sigma^2*k, so at sigma = sqrt(1/2) the order-1 forecast is
+    # EXACT on a linear series: F_hat = F_N + b*k = a + b*(N+k).
+    st["step"] = interval + 2                       # k = 2 past the newest anchor
+    st["sigma"] = math.sqrt(0.5)
+    check("forward extrapolation EXACT on linear series (sigma=sqrt(1/2), k=2)",
+          torch.allclose(hicache_forecast(st), a + b * float(interval + 2), atol=1e-6))
+    # at the default sigma the forecast must still move TOWARD the future value,
+    # i.e. strictly beat plain reuse of the cached anchor (catches an x=-k regression,
+    # which lands on the wrong side of the anchor and LOSES to reuse).
+    st["sigma"] = sig
+    err_fc = (hicache_forecast(st) - (a + b * float(interval + 2))).norm()
+    err_reuse = (b * 2.0).norm()                    # |F_N - F_{N+2}|
+    check("sign convention: forecast beats plain reuse on linear series", err_fc < err_reuse)
 
     # schedule cadence
     sched = hicache_init(num_steps=12, interval=4, max_order=1,

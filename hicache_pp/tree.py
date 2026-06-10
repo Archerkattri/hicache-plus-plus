@@ -49,9 +49,12 @@ def physicists_hermite(n: int, x: float) -> float:
 
 
 def hermite_coeff(order: int, k: int, sigma: float) -> float:
-    """Forecast coefficient ``Htilde_order(-k) / order!`` (a scalar, same for all
-    leaves). ``Htilde_n(x) = sigma^n H_n(sigma x)``."""
-    x = -float(k)
+    """Forecast coefficient ``Htilde_order(k) / order!`` (a scalar, same for all
+    leaves). ``Htilde_n(x) = sigma^n H_n(sigma x)``. Evaluated at ``x = +k``: the
+    finite differences are forward slopes, so forecasting ``k`` steps PAST the newest
+    anchor evaluates at ``+k`` (upstream TaylorSeer convention); ``-k`` extrapolates
+    backwards."""
+    x = float(k)
     htilde = (sigma ** order) * physicists_hermite(order, sigma * x)
     return htilde / math.factorial(order)
 
@@ -334,6 +337,13 @@ if __name__ == "__main__":
     expected = tree_axpy(hermite_coeff(1, 2, 0.5), lin(4), B)   # F4 + coeff * (Delta^1 == B)
     check("HiCache tree forecast matches explicit Hermite formula leafwise",
           tclose(hicache_forecast_tree(st2), expected, atol=1e-4))
+
+    # 3b) sign-convention regression: Htilde_1(k) = 2*sigma^2*k, so at sigma=sqrt(1/2)
+    #     the forecast is EXACT on the linear tree: forward extrapolation, not backward.
+    st2["sigma"] = math.sqrt(0.5)
+    check("tree forward extrapolation EXACT on linear tree (sigma=sqrt(1/2), k=2)",
+          tclose(hicache_forecast_tree(st2), lin(6), atol=1e-4))
+    st2["sigma"] = 0.5
 
     # 4) Adaptive-CFG: guidance term + reconstruction match full CFG ((1+w)c - w*u).
     w = 3.0

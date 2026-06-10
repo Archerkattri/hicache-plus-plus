@@ -1,0 +1,17 @@
+/home/krishi/workspace/gaussianfeels/gim_env/lib/python3.11/site-packages/huggingface_hub/utils/_validators.py:205: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
+  warnings.warn(
+  dmd_i4: 512/512  (483 ms/img, 65/250 compute)
+[done] dmd_i4: 482.6 ms/img, 65/250 compute calls -> results/latency_retime/dmd_i4.npz
+/home/krishi/workspace/gaussianfeels/gim_env/lib/python3.11/site-packages/huggingface_hub/utils/_validators.py:205: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
+  warnings.warn(
+  dmd_i6: 512/512  (337 ms/img, 45/250 compute)
+[done] dmd_i6: 337.4 ms/img, 45/250 compute calls -> results/latency_retime/dmd_i6.npz
+/home/krishi/workspace/gaussianfeels/gim_env/lib/python3.11/site-packages/huggingface_hub/utils/_validators.py:205: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
+  warnings.warn(
+  auto_i4: 512/512  (691 ms/img, 65/250 compute)
+[done] auto_i4: 691.1 ms/img, 65/250 compute calls -> results/latency_retime/auto_i4.npz
+/home/krishi/workspace/gaussianfeels/gim_env/lib/python3.11/site-packages/huggingface_hub/utils/_validators.py:205: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
+  warnings.warn(
+  auto_i4_horizon: 512/512  (691 ms/img, 65/250 compute)
+[done] auto_i4_horizon: 691.5 ms/img, 65/250 compute calls -> results/latency_retime/auto_i4_horizon.npz
+=== RETIME QUEUE DONE ===

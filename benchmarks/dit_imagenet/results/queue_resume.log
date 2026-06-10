@@ -47,3 +47,118 @@
 sign fix detected, proceeding
 /home/krishi/workspace/gaussianfeels/gim_env/lib/python3.11/site-packages/huggingface_hub/utils/_validators.py:205: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
   warnings.warn(
+=== resume: remaining original cells ===
+=== sign-fixed re-runs (require signfix.patch applied) ===
+sign fix detected, proceeding
+/home/krishi/workspace/gaussianfeels/gim_env/lib/python3.11/site-packages/huggingface_hub/utils/_validators.py:205: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
+  warnings.warn(
+  hermite_i4: 512/10000  (471 ms/img, 65/250 compute)
+  hermite_i4: 1024/10000  (472 ms/img, 65/250 compute)
+  hermite_i4: 1536/10000  (472 ms/img, 65/250 compute)
+  hermite_i4: 2048/10000  (472 ms/img, 65/250 compute)
+  hermite_i4: 2560/10000  (472 ms/img, 65/250 compute)
+  hermite_i4: 3072/10000  (472 ms/img, 65/250 compute)
+  hermite_i4: 3584/10000  (472 ms/img, 65/250 compute)
+  hermite_i4: 4096/10000  (472 ms/img, 65/250 compute)
+  hermite_i4: 4608/10000  (472 ms/img, 65/250 compute)
+  hermite_i4: 5120/10000  (472 ms/img, 65/250 compute)
+  hermite_i4: 5632/10000  (472 ms/img, 65/250 compute)
+  hermite_i4: 6144/10000  (472 ms/img, 65/250 compute)
+  hermite_i4: 6656/10000  (472 ms/img, 65/250 compute)
+  hermite_i4: 7168/10000  (472 ms/img, 65/250 compute)
+  hermite_i4: 7680/10000  (472 ms/img, 65/250 compute)
+  hermite_i4: 8192/10000  (472 ms/img, 65/250 compute)
+  hermite_i4: 8704/10000  (472 ms/img, 65/250 compute)
+  hermite_i4: 9216/10000  (472 ms/img, 65/250 compute)
+  hermite_i4: 9728/10000  (472 ms/img, 65/250 compute)
+[done] hermite_i4: 472.2 ms/img, 65/250 compute calls -> /home/krishi/workspace/gaussianfeels/third_party/hicache-plus-plus/benchmarks/dit_imagenet/results/fid10k_fix/hermite_i4.npz
+/home/krishi/workspace/gaussianfeels/gim_env/lib/python3.11/site-packages/huggingface_hub/utils/_validators.py:205: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
+  warnings.warn(
+  hermite_i6: 512/10000  (328 ms/img, 45/250 compute)
+  hermite_i6: 1024/10000  (328 ms/img, 45/250 compute)
+  hermite_i6: 1536/10000  (328 ms/img, 45/250 compute)
+  hermite_i6: 2048/10000  (328 ms/img, 45/250 compute)
+  hermite_i6: 2560/10000  (328 ms/img, 45/250 compute)
+  hermite_i6: 3072/10000  (328 ms/img, 45/250 compute)
+  hermite_i6: 3584/10000  (328 ms/img, 45/250 compute)
+  hermite_i6: 4096/10000  (328 ms/img, 45/250 compute)
+  hermite_i6: 4608/10000  (328 ms/img, 45/250 compute)
+  hermite_i6: 5120/10000  (328 ms/img, 45/250 compute)
+  hermite_i6: 5632/10000  (328 ms/img, 45/250 compute)
+  hermite_i6: 6144/10000  (328 ms/img, 45/250 compute)
+  hermite_i6: 6656/10000  (328 ms/img, 45/250 compute)
+  hermite_i6: 7168/10000  (328 ms/img, 45/250 compute)
+  hermite_i6: 7680/10000  (328 ms/img, 45/250 compute)
+  hermite_i6: 8192/10000  (328 ms/img, 45/250 compute)
+  hermite_i6: 8704/10000  (328 ms/img, 45/250 compute)
+  hermite_i6: 9216/10000  (328 ms/img, 45/250 compute)
+  hermite_i6: 9728/10000  (328 ms/img, 45/250 compute)
+[done] hermite_i6: 328.2 ms/img, 45/250 compute calls -> /home/krishi/workspace/gaussianfeels/third_party/hicache-plus-plus/benchmarks/dit_imagenet/results/fid10k_fix/hermite_i6.npz
+/home/krishi/workspace/gaussianfeels/gim_env/lib/python3.11/site-packages/huggingface_hub/utils/_validators.py:205: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
+  warnings.warn(
+  hermite_i8: 512/10000  (248 ms/img, 34/250 compute)
+  hermite_i8: 1024/10000  (248 ms/img, 34/250 compute)
+  hermite_i8: 1536/10000  (248 ms/img, 34/250 compute)
+  hermite_i8: 2048/10000  (248 ms/img, 34/250 compute)
+  hermite_i8: 2560/10000  (248 ms/img, 34/250 compute)
+  hermite_i8: 3072/10000  (248 ms/img, 34/250 compute)
+  hermite_i8: 3584/10000  (248 ms/img, 34/250 compute)
+  hermite_i8: 4096/10000  (248 ms/img, 34/250 compute)
+  hermite_i8: 4608/10000  (248 ms/img, 34/250 compute)
+  hermite_i8: 5120/10000  (248 ms/img, 34/250 compute)
+  hermite_i8: 5632/10000  (248 ms/img, 34/250 compute)
+  hermite_i8: 6144/10000  (248 ms/img, 34/250 compute)
+  hermite_i8: 6656/10000  (248 ms/img, 34/250 compute)
+  hermite_i8: 7168/10000  (248 ms/img, 34/250 compute)
+  hermite_i8: 7680/10000  (248 ms/img, 34/250 compute)
+  hermite_i8: 8192/10000  (248 ms/img, 34/250 compute)
+  hermite_i8: 8704/10000  (248 ms/img, 34/250 compute)
+  hermite_i8: 9216/10000  (248 ms/img, 34/250 compute)
+  hermite_i8: 9728/10000  (248 ms/img, 34/250 compute)
+[done] hermite_i8: 248.3 ms/img, 34/250 compute calls -> /home/krishi/workspace/gaussianfeels/third_party/hicache-plus-plus/benchmarks/dit_imagenet/results/fid10k_fix/hermite_i8.npz
+/home/krishi/workspace/gaussianfeels/gim_env/lib/python3.11/site-packages/huggingface_hub/utils/_validators.py:205: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
+  warnings.warn(
+  auto_i4: 512/10000  (733 ms/img, 65/250 compute)
+  auto_i4: 1024/10000  (732 ms/img, 65/250 compute)
+  auto_i4: 1536/10000  (732 ms/img, 65/250 compute)
+  auto_i4: 2048/10000  (732 ms/img, 65/250 compute)
+  auto_i4: 2560/10000  (732 ms/img, 65/250 compute)
+  auto_i4: 3072/10000  (732 ms/img, 65/250 compute)
+  auto_i4: 3584/10000  (732 ms/img, 65/250 compute)
+  auto_i4: 4096/10000  (730 ms/img, 65/250 compute)
+  auto_i4: 4608/10000  (725 ms/img, 65/250 compute)
+  auto_i4: 5120/10000  (722 ms/img, 65/250 compute)
+  auto_i4: 5632/10000  (719 ms/img, 65/250 compute)
+  auto_i4: 6144/10000  (717 ms/img, 65/250 compute)
+  auto_i4: 6656/10000  (715 ms/img, 65/250 compute)
+  auto_i4: 7168/10000  (713 ms/img, 65/250 compute)
+  auto_i4: 7680/10000  (714 ms/img, 65/250 compute)
+  auto_i4: 8192/10000  (715 ms/img, 65/250 compute)
+  auto_i4: 8704/10000  (716 ms/img, 65/250 compute)
+  auto_i4: 9216/10000  (717 ms/img, 65/250 compute)
+  auto_i4: 9728/10000  (718 ms/img, 65/250 compute)
+[done] auto_i4: 718.0 ms/img, 65/250 compute calls -> /home/krishi/workspace/gaussianfeels/third_party/hicache-plus-plus/benchmarks/dit_imagenet/results/fid10k_fix/auto_i4.npz
+/home/krishi/workspace/gaussianfeels/gim_env/lib/python3.11/site-packages/huggingface_hub/utils/_validators.py:205: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
+  warnings.warn(
+  auto_i4_horizon: 512/10000  (733 ms/img, 65/250 compute)
+  auto_i4_horizon: 1024/10000  (733 ms/img, 65/250 compute)
+  auto_i4_horizon: 1536/10000  (733 ms/img, 65/250 compute)
+  auto_i4_horizon: 2048/10000  (733 ms/img, 65/250 compute)
+  auto_i4_horizon: 2560/10000  (733 ms/img, 65/250 compute)
+  auto_i4_horizon: 3072/10000  (733 ms/img, 65/250 compute)
+  auto_i4_horizon: 3584/10000  (733 ms/img, 65/250 compute)
+  auto_i4_horizon: 4096/10000  (732 ms/img, 65/250 compute)
+  auto_i4_horizon: 4608/10000  (732 ms/img, 65/250 compute)
+  auto_i4_horizon: 5120/10000  (732 ms/img, 65/250 compute)
+  auto_i4_horizon: 5632/10000  (732 ms/img, 65/250 compute)
+  auto_i4_horizon: 6144/10000  (732 ms/img, 65/250 compute)
+  auto_i4_horizon: 6656/10000  (737 ms/img, 65/250 compute)
+  auto_i4_horizon: 7168/10000  (734 ms/img, 65/250 compute)
+  auto_i4_horizon: 7680/10000  (731 ms/img, 65/250 compute)
+  auto_i4_horizon: 8192/10000  (729 ms/img, 65/250 compute)
+  auto_i4_horizon: 8704/10000  (726 ms/img, 65/250 compute)
+  auto_i4_horizon: 9216/10000  (724 ms/img, 65/250 compute)
+  auto_i4_horizon: 9728/10000  (723 ms/img, 65/250 compute)
+[done] auto_i4_horizon: 721.8 ms/img, 65/250 compute calls -> /home/krishi/workspace/gaussianfeels/third_party/hicache-plus-plus/benchmarks/dit_imagenet/results/fid10k_fix/auto_i4_horizon.npz
+no baseline cell yet
+=== RESUME QUEUE DONE ===

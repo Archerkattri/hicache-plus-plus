@@ -465,7 +465,8 @@ if __name__ == "__main__":
     # eigendecomposition cache: bit-identical to the uncached fit-per-call
     # path across skip steps, scenarios, and cache invalidations
     # ------------------------------------------------------------------
-    for name_c, snaps_c in (("exponential", traj[:6]), ("osc-trend", traj_mis[:6])):
+    for name_c, snaps_full in (("exponential", traj[:7]), ("osc-trend", traj_mis[:7])):
+        snaps_c = snaps_full[:6]
         st_c = {"step": 0, "history": 8,
                 "dmd_snapshots": [(i, v) for i, v in enumerate(snaps_c)]}
         max_dev = 0.0
@@ -482,15 +483,20 @@ if __name__ == "__main__":
         n_snaps = len(st_c["dmd_snapshots"])
         check("eigencache fitted exactly once per window",
               st_c.get("_dmd_fit_key") == (n_snaps - 1, n_snaps, 1))
-        # a new snapshot must invalidate the cache and change the fit
+        # a new snapshot must invalidate the cache and change the fit. Use the
+        # trajectory's true next point: a synthetic snapshot (e.g. 1.5x the
+        # last) makes the refit eigenproblem near-defective, and CPU LAPACK's
+        # run-to-run nondeterminism then amplifies through the ill-conditioned
+        # eigenvectors to ~1e-8 forecast jitter (observed), flaking the check.
         key_before = st_c["_dmd_fit_key"]
-        st_c["dmd_snapshots"].append((6, snaps_c[-1] * 1.5))
+        st_c["dmd_snapshots"].append((6, snaps_full[6]))
         st_c["step"] = 7
         nxt = dmd_forecast_state(st_c)
         snaps_n = [v for _, v in st_c["dmd_snapshots"]]
-        check("new snapshot invalidates the eigencache (refit matches uncached)",
-              st_c["_dmd_fit_key"] != key_before
-              and float((nxt - dmd_forecast(snaps_n, 1)).abs().max()) < 1e-12)
+        dev_n = float((nxt - dmd_forecast(snaps_n, 1)).abs().max())
+        check(f"new snapshot invalidates the eigencache (refit matches uncached, "
+              f"dev {dev_n:.1e})",
+              st_c["_dmd_fit_key"] != key_before and dev_n < 1e-12)
 
     # auto serve path goes through the same cache and stays identical
     st_a = _drive(snaps_exp, 4, "horizon")            # picks dmd (checked above)

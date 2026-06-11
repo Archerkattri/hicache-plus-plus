@@ -1,0 +1,36 @@
+{
+  "model": "lodestones/Chroma1-HD",
+  "steps": 28,
+  "guidance": 4.0,
+  "seed": 42,
+  "prompts": [
+    "A cinematic photo of an astronaut riding a horse on Mars, golden hour, volumetric light",
+    "An intricate watercolor of a fox sleeping under a maple tree in autumn rain"
+  ],
+  "summary": {
+    "vanilla": {
+      "mean_s": 33.885045647621155,
+      "runs": [
+        34.33087658882141,
+        33.4392147064209
+      ],
+      "speedup_vs_vanilla": 1.0
+    },
+    "taylorseer": {
+      "mean_s": 32.183570981025696,
+      "runs": [
+        32.40219235420227,
+        31.96494960784912
+      ],
+      "speedup_vs_vanilla": 1.052867802258444
+    },
+    "dmd": {
+      "mean_s": 30.474175572395325,
+      "runs": [
+        30.69008207321167,
+        30.25826907157898
+      ],
+      "speedup_vs_vanilla": 1.111926574260323
+    }
+  }
+}

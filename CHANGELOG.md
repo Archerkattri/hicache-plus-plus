@@ -5,6 +5,7 @@ All notable changes, per version. Auto-generated from git tags by
 
 ## Unreleased
 
+- docs: add per-version CHANGELOG (d4ff82d)
 - fix(doi): update Zenodo DOI to correct concept record (18a1724)
 - FLUX A/B: rebuild dev grid with the vanilla column (3-arm), lead with FLUX.1-dev (real target) over Chroma (32e44f5)
 - docs(readme): surface the cache-dit FLUX A/B comparison grids (bd4022d)

@@ -355,6 +355,16 @@ All of these are flow-matching 3D generators, i.e. the side of the domain split 
 exponential basis wins. `fast-trellis2` is the TaylorSeer baseline fork (the upstream
 "Fast" accel), the v2 reference point, not a HiCache variant.
 
+**Sign-convention note (1.2.0 wave, 2026-06-10).** The family forks above vendor their own
+copy of the Hermite forecast, and all of them inherited the `x = -k` porting bug fixed here
+in 1.2.0; every fork has been updated to the corrected `x = +k` convention. The numbers
+published in each fork were measured with the as-released code and remain valid as-measured.
+Re-validated so far on the same protocols as published: SAM 3D Objects (slat stage) and
+Hunyuan3D-2 mini; see each fork's README for the corrected-vs-as-released tables. The DMD
+(`++`) arms are unaffected by the sign fix (it touches only their Hermite comparison arm and
+warm-up fallback), and they still vendor the pre-eigencache DMD fit, so 1.2.0's per-window
+eigendecomposition cache is a latency win they do not yet ship.
+
 ---
 
 ## Lineage & attribution

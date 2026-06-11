@@ -83,6 +83,27 @@ the symmetric-object variance above is a 2.1-scale effect). Wall-clock gain here
 (vs 2.1's ~1.8×) because mini's runtime is VAE-decode-dominated, not DiT-dominated — so skipping
 DiT forwards saves proportionally less. (Quality is the clean signal.)
 
+**Corrected-sign re-validation (2026-06-10).** Same protocol, as-released (`-k`) vs corrected
+(`+k`) Hermite; the as-released arm reproduces the published cells bit-exact (the protocol is
+deterministic), so differences are purely the sign:
+
+| config | as-released (`-k`) | corrected (`+k`) |
+|---|---:|---:|
+| vanilla | 0.794 | 0.794 |
+| HiCache i3/o2 | 0.792 | 0.760 |
+| HiCache i5/o3 (probe) | 0.738 | **0.784** |
+| HiCache i6/o3 (probe) | 0.578 | 0.404 |
+| DMD i5 (corrected warm-up fallback) | 0.794 (published) | 0.793 |
+
+At the published i3 the two signs match: the full-set 0.792-vs-0.760 gap is one Go-ICP
+alignment timeout on a rotationally symmetric bowl (scored unaligned); over the 7 objects
+aligned in both runs the means are 0.922 vs 0.921 (vanilla 0.911). At i5 the corrected sign
+is clearly better (0.784 vs 0.738, baseline 0.794) and rescues a catastrophic as-released
+cell (bottle 0.25 to 0.97) -- the regime where the backwards extrapolation bites. At i6 both
+signs are far below baseline (the polynomial ceiling dominates regardless of sign; DMD is the
+wide-skip answer). DMD i5 with the corrected Hermite warm-up fallback stays lossless within
+run noise (0.793 vs baseline 0.794).
+
 ## 3. SAM3D — slat-stage FlowMatching, real weights (PyTree velocities)
 
 End-to-end pipeline latency; geometry = output gaussians, F1 vs vanilla baseline. Warmup pass
@@ -103,6 +124,21 @@ it gives the best speedup (1.56×) — past Hermite's lossless i3.
 > `slat_generator` is a `sam3d_objects` FlowMatching — the **same architecture** as standalone
 > sam-3d-objects (whose weights are gated/undownloaded). The HiCache++ port is identical in
 > both; this table is the same FlowMatching run on real weights.
+
+**Corrected-sign re-validation (2026-06-10).** The family forks vendored the pre-1.2.0
+Hermite with the `x = -k` porting bug; after the 1.2.0 sign fix the slat-stage A/B was
+re-run on the same protocol (same harness, seed 42, F1\@0.05 vs uncached), as-released vs
+corrected, including wider Hermite probes:
+
+| config | as-released (`-k`) | corrected (`+k`) |
+|---|---:|---:|
+| HiCache i3/o2 | F1 1.000 / CD 0.0125 | F1 1.000 / CD 0.0121 |
+| HiCache i5/o3 | F1 1.000 / CD 0.0127 | F1 1.000 / CD 0.0126 |
+| HiCache i6/o3 | F1 1.000 / CD 0.0128 | F1 1.000 / CD 0.0128 |
+
+On this stage the sign does not visibly bite: geometry is F1-lossless out to i6 under both
+conventions (the published i3 row above is unchanged; Chamfer drift is marginally lower with
+the corrected sign at i3/i5). Speedups reproduce at 1.3-1.5x with run-to-run latency noise.
 
 ## 4. Fast-SAM3D — SS-stage TaylorSeer (forecast-basis A/B)
 

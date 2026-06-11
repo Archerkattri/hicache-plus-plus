@@ -302,6 +302,26 @@ Hunyuan3D-2-mini, SAM3D and Fast-SAM3D, and
 exponential basis to **cache-dit**, **Hugging Face diffusers** (`TaylorSeerCacheConfig`)
 and **Cache4Diffusion** in each project's native conventions.
 
+#### cache-dit FLUX A/B (the DMD-calibrator patch, end-to-end)
+
+The cache-dit patch was run as a three-arm A/B on a real FLUX-class DiT, one fresh
+subprocess per arm, identical prompts / seed 42 / 28 steps / 1024². No visible quality
+regression vs vanilla.
+
+![cache-dit FLUX A/B on Chroma1-HD: vanilla vs DBCache+TaylorSeer vs DBCache+DMD, same seed](integrations/pr_drafts/cache-dit/flux_ab/side_by_side.png)
+
+*Chroma1-HD (ungated de-distilled FLUX architecture), vanilla / TaylorSeer / DMD, same
+seed. Mean s/image 33.89 / 32.18 / 30.47, speedups 1.00x / 1.05x / **1.11x** (RTX 5090,
+n=2 prompts). The patched DMD calibrator is the fastest of the three with parity images.*
+
+![cache-dit FLUX.1-dev A/B: TaylorSeer vs DMD, same seed](integrations/pr_drafts/cache-dit/flux_ab/side_by_side_dev.png)
+
+*On-target re-run on FLUX.1-dev (license accepted), TaylorSeer / DMD vs vanilla: 1.15x /
+1.10x. Honest reading: on dev TaylorSeer edges DMD, the reverse of the Chroma ordering, and
+the 0.05x gap is within n=2 run-to-run noise. DMD is a competitive complementary basis whose
+edge is model-dependent; the per-window auto selector picks it where it wins (flow-matching
+3D generators). Full record: [`integrations/pr_drafts/cache-dit/flux_ab/`](integrations/pr_drafts/cache-dit/flux_ab/).*
+
 ### Tuning notes
 
 - **Pick the basis by family.** Flow-matching 3D velocity streams: `"dmd"`, push the

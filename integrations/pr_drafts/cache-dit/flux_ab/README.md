@@ -45,3 +45,23 @@ flow-matching, closer to the regime DMD targets, but the headline 3D flow-matchi
 lives in hicache-plus-plus's Hunyuan3D/SAM3D benches, not here. This A/B is an
 end-to-end "the patched calibrator runs and produces parity images on a real FLUX-class
 pipeline at a measured speedup" integration check.
+
+## On-target re-run: FLUX.1-dev (license accepted 2026-06-11)
+
+Same driver, `--model dev`, FLUX.1-dev, 28 steps, seed 42, n=2 prompts, RTX 5090:
+
+| arm | mean s/image | speedup vs vanilla |
+|---|---:|---:|
+| vanilla | 29.71 | 1.00x |
+| taylorseer | 25.90 | 1.15x |
+| dmd (this PR) | 26.94 | 1.10x |
+
+Honest reading: on FLUX.1-dev specifically, TaylorSeer edges DMD (1.15x vs 1.10x), the
+reverse of the Chroma1-HD ordering above (DMD 1.11x vs TaylorSeer 1.05x). FLUX is a
+DiT-class flow-matching transformer, the regime where our broader study finds polynomial
+forecasting competitive-to-better; at n=2 prompts the 0.05x gap is within run-to-run noise.
+The honest claim this evidence supports is therefore NOT "DMD is faster on FLUX" but
+"DMD is a competitive complementary forecast basis whose advantage is model-dependent,
+and the per-window auto selector chooses it where it wins (e.g. flow-matching 3D generators)."
+The PR pitch is updated to match: DMD as an added basis + the auto selector, never a
+universal-default claim.

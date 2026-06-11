@@ -1,0 +1,26 @@
+{
+  "model": "black-forest-labs/FLUX.1-dev",
+  "steps": 28,
+  "guidance": 3.5,
+  "seed": 42,
+  "prompts": [
+    "A cinematic photo of an astronaut riding a horse on Mars, golden hour, volumetric light",
+    "An intricate watercolor of a fox sleeping under a maple tree in autumn rain"
+  ],
+  "summary": {
+    "taylorseer": {
+      "mean_s": 25.90082025527954,
+      "runs": [
+        26.07480216026306,
+        25.72683835029602
+      ]
+    },
+    "dmd": {
+      "mean_s": 26.94143533706665,
+      "runs": [
+        27.043694019317627,
+        26.839176654815674
+      ]
+    }
+  }
+}

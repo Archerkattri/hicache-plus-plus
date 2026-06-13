@@ -196,12 +196,15 @@ def _dmd_fit_flat(snapshots, rank=0, ridge=1e-8):
 
 def _dmd_eval_flat(fit, k):
     """Evaluate a cached :func:`_dmd_fit_flat` at (fractional) horizon ``k``.
-    Returns ``None`` on a non-finite prediction (caller falls back to reuse)."""
+    Returns ``None`` on a non-finite prediction (caller falls back to reuse).
+    The finite check is post-cast: a finite float64 forecast can still overflow
+    to ``inf`` once cast to an fp16 output dtype, so the cast result is the thing
+    that must be guarded before it reaches the denoiser."""
     Phi, evals, b, dt = fit
-    pred = (Phi @ (evals.pow(float(k)) * b)).real
-    if not torch.isfinite(pred).all():
+    out = (Phi @ (evals.pow(float(k)) * b)).real.to(dt)
+    if not torch.isfinite(out).all():
         return None
-    return pred.to(dt)
+    return out
 
 
 def _dmd_forecast_flat(snapshots, k, rank=0, ridge=1e-8):

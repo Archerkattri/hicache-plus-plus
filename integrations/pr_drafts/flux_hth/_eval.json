@@ -1,0 +1,52 @@
+[
+  {
+    "arm": "dmd_rdt0.2",
+    "time_s": 9.24,
+    "speedup": 2.45,
+    "fwd": null,
+    "LPIPS": 0.1603,
+    "PSNR": 23.02,
+    "CLIP": 0.3203,
+    "CLIP_vanilla": 0.3251
+  },
+  {
+    "arm": "dmd_rdt0.45",
+    "time_s": 7.19,
+    "speedup": 3.14,
+    "fwd": null,
+    "LPIPS": 0.3779,
+    "PSNR": 19.75,
+    "CLIP": 0.3227,
+    "CLIP_vanilla": 0.3251
+  },
+  {
+    "arm": "taylorseer_rdt0.2",
+    "time_s": 8.87,
+    "speedup": 2.55,
+    "fwd": null,
+    "LPIPS": 0.2008,
+    "PSNR": 20.99,
+    "CLIP": 0.3231,
+    "CLIP_vanilla": 0.3251
+  },
+  {
+    "arm": "taylorseer_rdt0.45",
+    "time_s": 7.05,
+    "speedup": 3.21,
+    "fwd": null,
+    "LPIPS": 0.7837,
+    "PSNR": 11.83,
+    "CLIP": 0.2736,
+    "CLIP_vanilla": 0.3251
+  },
+  {
+    "arm": "spectrum",
+    "time_s": 6.8,
+    "speedup": 3.46,
+    "fwd": 14,
+    "LPIPS": 0.0724,
+    "PSNR": 28.18,
+    "CLIP": 0.3224,
+    "CLIP_vanilla": 0.3222
+  }
+]

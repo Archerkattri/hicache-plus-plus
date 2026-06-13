@@ -406,12 +406,13 @@ eigendecomposition cache is a latency win they do not yet ship.
 If you use this library, please cite HiCache++ (this work) and the methods it builds on:
 
 ```bibtex
-@misc{hicachepp2026,
-  title  = {No Single Basis Wins: An Empirical Domain Split in Diffusion Feature
-            Forecasting, and a Training-Free Mechanism for Selecting the Basis},
-  author = {Attri, Krishi},
-  year   = {2026},
-  note   = {https://github.com/Archerkattri/hicache-plus-plus}
+@article{attri2026hicachepp,
+  title   = {No Single Basis Wins: A Cross-Family Study of Diffusion Feature
+             Forecasting and the Limits of Training-Free Basis Selection},
+  author  = {Attri, Krishi},
+  journal = {engrXiv},
+  doi     = {10.31224/7309},
+  year    = {2026}
 }
 
 @misc{hicache2025,

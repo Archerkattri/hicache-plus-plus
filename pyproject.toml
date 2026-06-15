@@ -9,7 +9,7 @@ description = "Drop-in TaylorSeer/HiCache basis upgrade: training-free diffusion
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-authors = [{ name = "Krishi Attri", email = "kattri@snu.ac.kr" }]
+authors = [{ name = "Krishi Attri", email = "krishiattriwork@gmail.com" }]
 keywords = [
     "diffusion-acceleration", "feature-caching", "training-free", "flux", "dit",
     "dynamic-mode-decomposition", "prony", "diffusion", "flow-matching",

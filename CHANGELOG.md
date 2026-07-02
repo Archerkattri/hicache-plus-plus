@@ -3,8 +3,17 @@
 All notable changes, per version. Auto-generated from git tags by
 `third_party/launch_materials/gen_changelogs.sh`; do not edit by hand.
 
-## Unreleased
+## v1.2.1 — 2026-07-02
 
+- release: 1.2.1 -- version sync (__version__ literal + pyproject + CITATION) with drift test
+- docs(readme): credit the upstream cache-dit DMD-calibrator merge (vipshop/cache-dit#1053, cache-dit v1.5.0)
+- bench(flux): DMD vs Spectrum vs TaylorSeer head-to-head on FLUX.1-dev (d7bb862)
+- fix(dmd): guard the DMD forecast cast against fp16 overflow (2a195b7)
+- docs: use the auto-updating GitHub-Zenodo DOI badge (always shows the live latest DOI) (f7168a0)
+- docs: cite stable Zenodo concept DOI (was a version DOI that changes per release) (c0bae27)
+- docs: add engrXiv paper badge (a2293f6)
+- docs: add engrXiv preprint DOI (10.31224/7309) (9375a77)
+- docs: sort CHANGELOG under version headers (d2b32fe)
 - docs: add per-version CHANGELOG (d4ff82d)
 - fix(doi): update Zenodo DOI to correct concept record (18a1724)
 - FLUX A/B: rebuild dev grid with the vanilla column (3-arm), lead with FLUX.1-dev (real target) over Chroma (32e44f5)
@@ -13,27 +22,6 @@ All notable changes, per version. Auto-generated from git tags by
 - evidence(cache-dit DMD PR): FLUX-class A/B (Chroma1-HD) — DMD 1.11x > TaylorSeer 1.05x > vanilla (432e11e)
 - Ignore paper/ (manuscripts never live in the repo) (3599c2c)
 - docs: family sign-fix wave -- corrected-vs-as-released re-validation tables (5d620f1)
-- release: 1.2.0 -- version sync (__version__ literal + pyproject) with drift test (381754a)
-- docs+paper: the truthful selection arc + complete final DiT tables everywhere (3a337f8)
-- bench(dit-imagenet): bank Phase 1b (corrected hermite + holdout A/B) + post-eigencache latency re-time; RESULTS_DIT final (01021d2)
-- compute_fid: parse auto/_horizon/_fix cell names (was crashing on auto_i4_horizon) (1663317)
-- docs+paper: restructure around the domain-split narrative (no single basis wins) (dd4a9e3)
-- test(dmd): deflake eigencache-invalidation check (append the trajectory's true next point, print the deviation) (3753429)
-- bench(dit-imagenet): bank dmd_i8 + taylor_i4 FID-10k cells; Phase-1b corrected-rerun placeholder table + pre-registered analysis; horizon A/B cell promoted in resume queue (075af83)
-- bench(dit-imagenet): --holdout flag + fix resume-queue guards (pure-compute resume) (5eba9b7)
-- docs: README refresh for 1.2.0.dev0 (sign fix, auto holdout modes, eigencache, honest DiT status) (87e7c3d)
-- perf(dmd): cache the eigendecomposition per compute window (limitation 1) (031a440)
-- feat(auto): horizon-matched holdout (opt-in), decided on microbench evidence (21ec37d)
-- feat(bench-dit): per-1k-image atomic checkpointing + resume (limitation 5) (66a0e6d)
-- fix(bench-dit): taylor_forecast evaluates the monomial at +k, not -k (fb54509)
-- fix(hermite): evaluate the Hermite basis at +k, not -k (porting bug) (8ebdab2)
-- bench(dit-imagenet): bank FID-10k ladder partials + resume queue (ac640b8)
-- DOI badge: static shields.io (Zenodo badge endpoint 302s through GitHub's proxy) (e1c7407)
-- Zenodo DOI badge + CITATION.cff (5071b38)
-- v1.1.0 (8664a52)
-- docs: drop unreleased dit-plus row from the family matrix (36f2733)
-- Microbench: auto backend row + drift/regime-switch scenarios (7e1c2fc)
-- Holdout 'auto' backend, snapshot ownership fix, README/SEO surgery, PR drafts, preprint (e22adb3)
 
 ## v1.2.0 — 2026-06-10
 

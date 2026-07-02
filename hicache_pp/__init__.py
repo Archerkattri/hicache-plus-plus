@@ -42,4 +42,4 @@ __all__ = [
 # asserts the two match. (importlib.metadata is NOT used on purpose: when this package
 # is imported from a source tree on sys.path while an older wheel is also installed,
 # the metadata lookup reports the wheel's version, not the code actually imported.)
-__version__ = "1.2.0"
+__version__ = "1.2.1"

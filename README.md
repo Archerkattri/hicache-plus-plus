@@ -54,6 +54,16 @@ signal about forward quality. Therefore:
   demonstrably solves; do not expect it to discover the family-level winner.
 - Per-window basis selection from real feature trajectories is an **open problem**.
 
+## Upstreamed
+
+The exponential (DMD) basis is now available upstream, not only in this repo: the DMD
+calibrator was merged into [**vipshop/cache-dit**](https://github.com/vipshop/cache-dit)
+([PR #1053](https://github.com/vipshop/cache-dit/pull/1053), merged 2026-06-14) and ships
+in **cache-dit v1.5.0**, which powers SGLang-Diffusion, vLLM-Omni, and ComfyUI. It
+registers a `DBCache + DMD` calibrator so cache-dit users can select the exponential basis
+alongside TaylorSeer; the end-to-end FLUX A/B behind the patch is
+[below](#cache-dit-flux-ab-the-dmd-calibrator-patch-end-to-end).
+
 ## Quickstart
 
 ```python

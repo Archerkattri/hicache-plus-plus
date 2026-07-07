@@ -12,6 +12,7 @@ own pre-registered DiT A/B, does NOT solve the domain split. Pick the basis by m
 family; the numbers for both families are below.**
 
 [![PyPI](https://img.shields.io/pypi/v/hicache-pp)](https://pypi.org/project/hicache-pp/)
+[![CI](https://github.com/Archerkattri/hicache-plus-plus/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/Archerkattri/hicache-plus-plus/actions/workflows/ci.yml)
 [![DOI](https://zenodo.org/badge/1260475033.svg)](https://zenodo.org/badge/latestdoi/1260475033)
 &nbsp;[![Paper](https://img.shields.io/badge/engrXiv-10.31224%2F7309-009E73.svg)](https://doi.org/10.31224/7309)
 &nbsp;[![License](https://img.shields.io/badge/license-MIT-2e6db0.svg)](LICENSE)

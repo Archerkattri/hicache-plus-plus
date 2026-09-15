@@ -29,6 +29,11 @@ class of the local feature-ODE fitted by Dynamic Mode Decomposition (Prony), ben
 it across two diffusion families, and found the honest answer:
 
 ## The domain split (read this first)
+## Architecture at a glance
+
+![hicache-plus-plus architecture](assets/readme_flow.svg)
+
+HiCache++ treats the forecast basis as a model-family decision: exponential dynamics for the validated flow-matching path, Hermite for the validated DiT path.
 
 | workload | winning basis | evidence |
 |---|---|---|

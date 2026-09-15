@@ -25,10 +25,43 @@ Integrate by calling these helpers from the ODE-solver step (see ``integrations/
 is no runtime monkey-patching.
 """
 import math
+from copy import deepcopy
 from typing import Any, Dict, List, Optional, Tuple
+import uuid
 
 import torch
 from torch.utils import _pytree
+
+
+def _new_telemetry() -> Dict[str, Any]:
+    return {
+        "decisions": {"full": 0, "forecast": 0},
+        "method_counts": {"hermite": 0, "dmd": 0, "reuse": 0},
+        "fallbacks": {},
+    }
+
+
+def _ensure_telemetry(state: Dict[str, Any]) -> Dict[str, Any]:
+    telemetry = state.setdefault("telemetry", _new_telemetry())
+    telemetry.setdefault("decisions", {})
+    telemetry.setdefault("method_counts", {})
+    telemetry.setdefault("fallbacks", {})
+    return telemetry
+
+
+def _record_method(state: Dict[str, Any], method: str) -> None:
+    counts = _ensure_telemetry(state)["method_counts"]
+    counts[method] = int(counts.get(method, 0)) + 1
+
+
+def _record_fallback(state: Dict[str, Any], reason: str) -> None:
+    fallbacks = _ensure_telemetry(state)["fallbacks"]
+    fallbacks[reason] = int(fallbacks.get(reason, 0)) + 1
+
+
+def hicache_telemetry(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a detached copy of additive decision/method/fallback telemetry."""
+    return deepcopy(_ensure_telemetry(state))
 
 
 # --------------------------------------------------------------------------- #
@@ -110,21 +143,49 @@ def hicache_init(num_steps, interval=4, max_order=1, first_enhance=2,
         "first_enhance": int(first_enhance),
         "end_enhance": int(end_enhance if end_enhance is not None else num_steps),
         "sigma": float(sigma), "backend": str(backend), "history": int(history),
+        "run_id": uuid.uuid4().hex, "branch_id": None,
+        "telemetry": _new_telemetry(),
         "step": 0, "counter": 0,
-        "activated_steps": [], "derivatives": {}, "prev_derivatives": {},
+        "type": None, "activated_steps": [], "derivatives": {}, "prev_derivatives": {},
         "dmd_snapshots": [],   # [(compute_step, velocity_tree), ...] for the DMD backend
     }
 
 
 def hicache_decide(state: Dict[str, Any]) -> str:
     step = state["step"]
+    no_anchor = not state.get("derivatives")
     if step < state["first_enhance"] or step >= state["end_enhance"] \
+            or no_anchor \
             or state["counter"] >= state["interval"] - 1:
         state["counter"] = 0
         state["activated_steps"].append(step)
-        return "full"
-    state["counter"] += 1
-    return "forecast"
+        state["type"] = "full"
+    else:
+        state["counter"] += 1
+        state["type"] = "forecast"
+    decision = state["type"]
+    decisions = _ensure_telemetry(state)["decisions"]
+    decisions[decision] = int(decisions.get(decision, 0)) + 1
+    return decision
+
+
+def hicache_reset(state: Dict[str, Any], *, run_id: Optional[str] = None,
+                  branch_id: Optional[str] = None) -> Dict[str, Any]:
+    """Reset mutable tree sampling state in place and return the same object."""
+    state["run_id"] = str(run_id) if run_id is not None else uuid.uuid4().hex
+    if branch_id is not None:
+        state["branch_id"] = str(branch_id)
+    state["step"] = 0
+    state["counter"] = 0
+    state["type"] = None
+    state["activated_steps"] = []
+    state["derivatives"] = {}
+    state["prev_derivatives"] = {}
+    state["dmd_snapshots"] = []
+    for key in ("_dmd_tree_fit", "_dmd_tree_fit_key", "_auto_choice", "_auto_choice_key"):
+        state.pop(key, None)
+    state["telemetry"] = _new_telemetry()
+    return state
 
 
 def hicache_update_tree(state: Dict[str, Any], velocity_tree: Any) -> None:
@@ -145,6 +206,7 @@ def hicache_forecast_tree(state: Dict[str, Any]) -> Any:
     deriv = state["derivatives"]
     if 0 not in deriv:
         raise RuntimeError("hicache_forecast_tree called before any compute step")
+    _record_method(state, "hermite")
     k = state["step"] - state["activated_steps"][-1]
     result = deriv[0]
     order = 1
@@ -225,7 +287,7 @@ def dmd_update_snapshots_tree(state: Dict[str, Any], velocity_tree: Any, history
     window — the diffusion dynamics are non-autonomous, so a long window averages over
     changing dynamics)."""
     snaps = state.setdefault("dmd_snapshots", [])
-    snaps.append((int(state["activated_steps"][-1]), velocity_tree))
+    snaps.append((int(state["activated_steps"][-1]), _tree_snapshot(velocity_tree)))
     h = int(state.get("history", history))
     if len(snaps) > h:
         del snaps[: len(snaps) - h]
@@ -244,6 +306,7 @@ def dmd_forecast_tree(state: Dict[str, Any]) -> Any:
     keyed by (newest compute step, window length, spacing) and recomputed exactly
     when a new snapshot arrives."""
     snaps = state.get("dmd_snapshots", [])
+    fallback_reason = "dmd_insufficient_uniform_history"
     if len(snaps) >= 4:
         steps = [s for s, _ in snaps]
         spacing = steps[-1] - steps[-2]
@@ -266,7 +329,11 @@ def dmd_forecast_tree(state: Dict[str, Any]) -> Any:
                 kf = (state["step"] - steps[-1]) / spacing
                 pred = _dmd_eval_flat(fit, kf) if fit is not None else None
                 if pred is None:
+                    _record_fallback(state, "dmd_fit_failed" if fit is None else "dmd_nonfinite_output")
+                    _record_method(state, "reuse")
                     pred = newest_vec.clone()
+                else:
+                    _record_method(state, "dmd")
                 out, i = [], 0
                 for sh in shapes:
                     n = 1
@@ -274,6 +341,8 @@ def dmd_forecast_tree(state: Dict[str, Any]) -> Any:
                         n *= int(d)
                     out.append(pred[i:i + n].reshape(sh)); i += n
                 return _pytree.tree_unflatten(out, spec)
+            fallback_reason = "dmd_nonuniform_or_short_tail"
+    _record_fallback(state, fallback_reason)
     return hicache_forecast_tree(state)
 
 
@@ -407,6 +476,9 @@ if __name__ == "__main__":
 
     # 7) HiCache schedule cadence
     sc2 = hicache_init(num_steps=12, interval=4, max_order=1, first_enhance=2, end_enhance=10, sigma=0.5)
+    # Schedule-only check: seed the state so the no-anchor safety guard does not
+    # intentionally override the cadence being tested.
+    sc2["derivatives"] = {0: tree(torch.zeros(1), torch.zeros(1))}
     seq = []
     for s in range(12):
         sc2["step"] = s; seq.append(hicache_decide(sc2))

@@ -86,6 +86,67 @@ for i, t in enumerate(timesteps):
     x = scheduler.step(v, t, x)
 ```
 
+### State lifecycle and telemetry
+
+`first_enhance=0` is supported: if a state has no anchor yet,
+`hicache_decide(state)` returns `"full"` so the caller can compute and store the
+first velocity before any forecast is attempted. Calling `hicache_forecast` directly
+before storing an anchor remains an error.
+
+Each new state has an opaque `run_id`, a nullable `branch_id`, and additive
+`telemetry` fields: `decisions`, `method_counts` (`hermite`, `dmd`, `reuse`), and
+`fallbacks` keyed by reason. Use `hicache_reset(state)` between runs; it clears
+anchors, cached fits, and counters while preserving configuration. The tree-aware
+equivalents are available as `hicache_pp.tree.hicache_reset` and
+`hicache_pp.tree.hicache_telemetry`.
+
+The deterministic central adapter contract can be exercised without a model or
+GPU with `python tests/test_h1_adapter_contract.py`. It covers flat and PyTree
+traces, interval-1 bypass, reset/retry isolation, and visible uniform-history
+versus fallback decisions.
+
+### Deployment budgets and portable manifests
+
+For production integrations, put the forecast behind an explicit immutable
+budget instead of treating an interval as a universal quality promise:
+
+```python
+from hicache_pp import CacheBudget, CacheBudgetRuntime, RunIdentity
+
+budget = CacheBudget(
+    backend="dmd",
+    allowed_stages=("shape",),
+    max_horizon=2,
+    quality_preset="conservative",
+    max_memory_mb=16_384,
+    audit_budget=2,
+    fallback="full",
+)
+identity = RunIdentity(
+    model_id="hunyuan3d-2.1",
+    run_id="job-opaque-id",
+    weights_digest="sha256:...",
+    schedule_digest="sha256:...",
+    cfg_branch="cond",
+    conditioning_id="sha256:...",
+    stage="shape",
+    token_layout_digest="sha256:...",
+    dtype="float16",
+    device="cuda:0",
+)
+runtime = CacheBudgetRuntime(budget, identity)
+decision = runtime.decide("shape", horizon=2, method="dmd")
+```
+
+The runtime returns an auditable `full`, `forecast` or `fallback` decision for
+every request. Stage/horizon/memory/error violations are explicit, and
+`backend="auto"` must be accompanied by a controller selection. Each runtime
+also exposes `runtime.manifest.as_dict()` / `to_json()` with source, model,
+configuration and input digests, actual decision counts, measured costs and
+validation fields. The manifest rejects tensors, prompts, images and local
+paths; it is suitable for attaching to an adapter benchmark without collecting
+private inputs.
+
 If you already run TaylorSeer or HiCache this is a basis swap, not a new pipeline: the
 compute/skip schedule, warm-up and API stay identical. Only the per-skip forecast formula
 changes. Backends: `"hermite"` (corrected HiCache polynomial; pick this for DiT-class
@@ -455,3 +516,11 @@ If you use this library, please cite HiCache++ (this work) and the methods it bu
   eprint = {2312.12487}, archivePrefix = {arXiv}, year = {2023}
 }
 ```
+
+## Current release status
+
+The current implementation includes the forward-error ledger, risk controller,
+immutable budget/run identity and privacy-safe manifest runtime. The CPU suite
+passes 30 tests and the synthetic regime-switch pilot is reproducible. GPU
+diffusion output-quality, throughput and learned-model comparisons remain
+unmeasured and must not be inferred from the CPU contract results.

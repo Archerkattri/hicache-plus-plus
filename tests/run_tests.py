@@ -7,7 +7,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 MODULES = ["hicache_pp.hermite", "hicache_pp.dmd", "hicache_pp.tree"]
 SCRIPTS = ["tests/test_bench_dit.py", "tests/test_bench_checkpoint.py",
-           "tests/test_version.py"]
+           "tests/test_version.py", "tests/test_h0.py",
+           "tests/test_h1_adapter_contract.py"]
 
 
 def main() -> int:

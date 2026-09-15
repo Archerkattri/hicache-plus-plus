@@ -28,15 +28,30 @@ from . import hermite, dmd, tree
 # flat-tensor API
 from .hermite import (
     hicache_init, hicache_decide, hicache_update_derivatives, hicache_forecast,
-    physicists_hermite, scaled_hermite,
+    hicache_reset, hicache_telemetry, physicists_hermite, scaled_hermite,
 )
 from .dmd import dmd_forecast, dmd_update_snapshots, dmd_forecast_state, auto_forecast_state
+from .forward_audit import ForwardAuditLedger, ForwardEvent, ForwardObservation
+from .controller import ControllerChoice, ForwardRiskController
+from .budget import (
+    BudgetDecision,
+    CacheBudget,
+    CacheBudgetRuntime,
+    RunIdentity,
+    RunManifest,
+    stable_digest,
+)
 
 __all__ = [
     "hermite", "dmd", "tree",
     "hicache_init", "hicache_decide", "hicache_update_derivatives", "hicache_forecast",
+    "hicache_reset", "hicache_telemetry",
     "physicists_hermite", "scaled_hermite",
     "dmd_forecast", "dmd_update_snapshots", "dmd_forecast_state", "auto_forecast_state",
+    "ForwardAuditLedger", "ForwardEvent", "ForwardObservation",
+    "ControllerChoice", "ForwardRiskController",
+    "CacheBudget", "CacheBudgetRuntime", "BudgetDecision",
+    "RunIdentity", "RunManifest", "stable_digest",
 ]
 # Synced literal; pyproject.toml is the source of truth and tests/test_version.py
 # asserts the two match. (importlib.metadata is NOT used on purpose: when this package

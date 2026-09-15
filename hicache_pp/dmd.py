@@ -31,6 +31,18 @@ import math
 import torch
 
 
+def _record_method(state, method: str) -> None:
+    telemetry = state.setdefault("telemetry", {})
+    counts = telemetry.setdefault("method_counts", {})
+    counts[method] = int(counts.get(method, 0)) + 1
+
+
+def _record_fallback(state, reason: str) -> None:
+    telemetry = state.setdefault("telemetry", {})
+    fallbacks = telemetry.setdefault("fallbacks", {})
+    fallbacks[reason] = int(fallbacks.get(reason, 0)) + 1
+
+
 def dmd_fit(snapshots, rank: int = 0, ridge: float = 1e-8):
     """Fit the DMD eigendecomposition once for a snapshot window.
 
@@ -69,9 +81,10 @@ def dmd_eval(fit, k):
     (caller falls back to last-value reuse)."""
     Phi, evals, b, shp, dt = fit
     pred = (Phi @ (evals.pow(float(k)) * b)).real                                # [d]
+    pred = pred.to(dt)
     if not torch.isfinite(pred).all():
         return None
-    return pred.to(dt).reshape(shp)
+    return pred.reshape(shp)
 
 
 def dmd_forecast(snapshots, k: int, rank: int = 0, ridge: float = 1e-8) -> torch.Tensor:
@@ -141,6 +154,7 @@ def dmd_forecast_state(state) -> torch.Tensor:
     new snapshot arrives; the per-skip cost drops from one SVD+eig+lstsq to one
     ``Phi @ (lambda**k * b)``."""
     snaps = state.get("dmd_snapshots", [])
+    fallback_reason = "dmd_insufficient_uniform_history"
     if len(snaps) >= 4:
         steps = [s for s, _ in snaps]
         spacing = steps[-1] - steps[-2]
@@ -160,11 +174,18 @@ def dmd_forecast_state(state) -> torch.Tensor:
                 fit = state["_dmd_fit"]
                 k = (state["step"] - steps[-1]) / spacing        # fractional horizon
                 pred = dmd_eval(fit, k) if fit is not None else None
-                return vels[-1].clone() if pred is None else pred
+                if pred is not None:
+                    _record_method(state, "dmd")
+                    return pred
+                _record_fallback(state, "dmd_fit_failed" if fit is None else "dmd_nonfinite_output")
+                _record_method(state, "reuse")
+                return vels[-1].clone()
+            fallback_reason = "dmd_nonuniform_or_short_tail"
     try:                                                         # lazy: keep standalone-testable
         from .hermite import hicache_forecast
     except ImportError:
         from hermite import hicache_forecast
+    _record_fallback(state, fallback_reason)
     return hicache_forecast(state)
 
 
@@ -307,7 +328,12 @@ def auto_forecast_state(state) -> torch.Tensor:
                     fit = state["_dmd_fit"]
                     k = (state["step"] - steps[-1]) / spacing
                     pred = dmd_eval(fit, k) if fit is not None else None
-                    return vels[-1].clone() if pred is None else pred
+                    if pred is not None:
+                        _record_method(state, "dmd")
+                        return pred
+                    _record_fallback(state, "dmd_fit_failed" if fit is None else "dmd_nonfinite_output")
+                    _record_method(state, "reuse")
+                    return vels[-1].clone()
                 # fall through to the Hermite forecast below
     try:                                                         # lazy: keep standalone-testable
         from .hermite import hicache_forecast

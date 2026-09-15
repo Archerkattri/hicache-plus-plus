@@ -3,6 +3,14 @@
 All notable changes, per version. Auto-generated from git tags by
 `third_party/launch_materials/gen_changelogs.sh`; do not edit by hand.
 
+## Unreleased — deployment contract
+
+- Add immutable quality/latency/memory budgets, run identity fingerprints,
+  conservative fallback decisions and tensor/path-free portable run manifests.
+- Wire the contract into the standalone ComfyUI-Hunyuan3D, TRELLIS and
+  TRELLIS.2 consumer patches with horizon/memory/audit controls and actual
+  decision-count reporting.
+
 ## v1.2.1 — 2026-07-02
 
 - release: 1.2.1 -- version sync (__version__ literal + pyproject + CITATION) with drift test

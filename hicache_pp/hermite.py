@@ -44,9 +44,43 @@ at ``-k`` extrapolates backwards (odd-order terms flip sign).
 from __future__ import annotations
 
 import math
+from copy import deepcopy
 from typing import Any, Dict, Optional
+import uuid
 
 import torch
+
+
+def _new_telemetry() -> Dict[str, Any]:
+    """Return the intentionally small, additive state telemetry schema."""
+    return {
+        "decisions": {"full": 0, "forecast": 0},
+        "method_counts": {"hermite": 0, "dmd": 0, "reuse": 0},
+        "fallbacks": {},
+    }
+
+
+def _ensure_telemetry(state: Dict[str, Any]) -> Dict[str, Any]:
+    telemetry = state.setdefault("telemetry", _new_telemetry())
+    telemetry.setdefault("decisions", {})
+    telemetry.setdefault("method_counts", {})
+    telemetry.setdefault("fallbacks", {})
+    return telemetry
+
+
+def _record_method(state: Dict[str, Any], method: str) -> None:
+    counts = _ensure_telemetry(state)["method_counts"]
+    counts[method] = int(counts.get(method, 0)) + 1
+
+
+def _record_fallback(state: Dict[str, Any], reason: str) -> None:
+    fallbacks = _ensure_telemetry(state)["fallbacks"]
+    fallbacks[reason] = int(fallbacks.get(reason, 0)) + 1
+
+
+def hicache_telemetry(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a detached copy of additive decision/method/fallback telemetry."""
+    return deepcopy(_ensure_telemetry(state))
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +167,9 @@ def hicache_init(
         "backend": str(backend),
         "history": int(history),
         "holdout": str(holdout),
+        "run_id": uuid.uuid4().hex,
+        "branch_id": None,
+        "telemetry": _new_telemetry(),
         "step": 0,
         "counter": 0,            # forecasts since last compute
         "type": None,            # "full" | "forecast"
@@ -145,20 +182,54 @@ def hicache_init(
 
 def hicache_decide(state: Dict[str, Any]) -> str:
     """Decide whether the current step is computed or forecast. Mirrors the
-    paper's ``t mod N`` schedule plus the first/last enhance-window guards."""
+    paper's ``t mod N`` schedule plus the first/last enhance-window guards.
+
+    A state with no anchor always returns ``"full"``.  This makes
+    ``first_enhance=0`` safe: the first decision cannot select a forecast before
+    the caller has supplied any feature to forecast.
+    """
     step = state["step"]
     first = step < state["first_enhance"]
     last = step >= state["end_enhance"]
     interval_hit = state["counter"] >= state["interval"] - 1
+    no_anchor = not state.get("derivatives")
 
-    if first or last or interval_hit:
+    if first or last or interval_hit or no_anchor:
         state["type"] = "full"
         state["counter"] = 0
         state["activated_steps"].append(step)
     else:
         state["type"] = "forecast"
         state["counter"] += 1
+    _ensure_telemetry(state)["decisions"][state["type"]] = (
+        int(_ensure_telemetry(state)["decisions"].get(state["type"], 0)) + 1
+    )
     return state["type"]
+
+
+def hicache_reset(state: Dict[str, Any], *, run_id: Optional[str] = None,
+                  branch_id: Optional[str] = None) -> Dict[str, Any]:
+    """Reset mutable sampling state in place and return the same state object.
+
+    Configuration keys and the existing public state-dict shape are preserved.
+    A reset starts a fresh run identity unless one is supplied; ``branch_id`` is
+    retained unless a replacement is supplied.  This wrapper is additive and
+    does not change any existing helper signature.
+    """
+    state["run_id"] = str(run_id) if run_id is not None else uuid.uuid4().hex
+    if branch_id is not None:
+        state["branch_id"] = str(branch_id)
+    state["step"] = 0
+    state["counter"] = 0
+    state["type"] = None
+    state["activated_steps"] = []
+    state["derivatives"] = {}
+    state["prev_derivatives"] = {}
+    state["dmd_snapshots"] = []
+    for key in ("_dmd_fit", "_dmd_fit_key", "_auto_choice", "_auto_choice_key"):
+        state.pop(key, None)
+    state["telemetry"] = _new_telemetry()
+    return state
 
 
 def hicache_update_derivatives(state: Dict[str, Any], feature: torch.Tensor) -> None:
@@ -195,6 +266,7 @@ def hicache_forecast(state: Dict[str, Any]) -> torch.Tensor:
     deriv = state["derivatives"]
     if 0 not in deriv:
         raise RuntimeError("hicache_forecast called before any compute step")
+    _record_method(state, "hermite")
 
     k = state["step"] - state["activated_steps"][-1]
     sigma = state["sigma"]
@@ -264,6 +336,9 @@ if __name__ == "__main__":
     # schedule cadence
     sched = hicache_init(num_steps=12, interval=4, max_order=1,
                          first_enhance=2, end_enhance=10, sigma=sig)
+    # Schedule-only check: seed the state so the no-anchor safety guard does not
+    # intentionally override the cadence being tested.
+    sched["derivatives"] = {0: torch.zeros(1)}
     types = []
     for s in range(12):
         sched["step"] = s; types.append(hicache_decide(sched))

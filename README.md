@@ -28,12 +28,13 @@ as a better basis. We built the natural endpoint of that ladder, the exponential
 class of the local feature-ODE fitted by Dynamic Mode Decomposition (Prony), benchmarked
 it across two diffusion families, and found the honest answer:
 
+## Runtime decision path
+
+![HiCache++ runtime decision path](assets/readme_flow.svg)
+
+A content-bound budget selects the supported backend, audits held-out forecast error, and either forecasts the next state or pays for a fresh model evaluation.
+
 ## The domain split (read this first)
-## Architecture at a glance
-
-![hicache-plus-plus architecture](assets/readme_flow.svg)
-
-HiCache++ treats the forecast basis as a model-family decision: exponential dynamics for the validated flow-matching path, Hermite for the validated DiT path.
 
 | workload | winning basis | evidence |
 |---|---|---|

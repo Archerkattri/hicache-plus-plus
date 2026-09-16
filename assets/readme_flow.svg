@@ -1,31 +1,27 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 198" role="img" aria-labelledby="title desc">
-  <title id="title">HiCache++ architecture</title>
-  <desc id="desc">Model-family-aware feature forecasting</desc>
-  <rect width="900" height="198" rx="18" fill="#020617"/>
-  <text x="28" y="36" fill="#f8fafc" font-family="Inter,Segoe UI,sans-serif" font-size="22" font-weight="700">HiCache++</text>
-  <text x="28" y="62" fill="#94a3b8" font-family="Inter,Segoe UI,sans-serif" font-size="13">Model-family-aware feature forecasting</text>
-  <path d="M212 131h22m-8-6 8 6-8 6" fill="none" stroke="#64748b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M432 131h22m-8-6 8 6-8 6" fill="none" stroke="#64748b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M652 131h22m-8-6 8 6-8 6" fill="none" stroke="#64748b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-  <g transform="translate(28 94)">
-    <rect width="184" height="74" rx="12" fill="#111827" stroke="#38bdf8" stroke-width="1.5"/>
-    <text x="92" y="31" text-anchor="middle" fill="#f8fafc" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="700">BACKBONE STEP</text>
-    <text x="92" y="53" text-anchor="middle" fill="#94a3b8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10">STAGE 1</text>
-  </g>
-  <g transform="translate(248 94)">
-    <rect width="184" height="74" rx="12" fill="#111827" stroke="#38bdf8" stroke-width="1.5"/>
-    <text x="92" y="31" text-anchor="middle" fill="#f8fafc" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="700">FEATURE CACHE</text>
-    <text x="92" y="53" text-anchor="middle" fill="#94a3b8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10">STAGE 2</text>
-  </g>
-  <g transform="translate(468 94)">
-    <rect width="184" height="74" rx="12" fill="#111827" stroke="#38bdf8" stroke-width="1.5"/>
-    <text x="92" y="31" text-anchor="middle" fill="#f8fafc" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="700">BASIS SELECTOR</text>
-    <text x="92" y="53" text-anchor="middle" fill="#94a3b8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10">STAGE 3</text>
-  </g>
-  <g transform="translate(688 94)">
-    <rect width="184" height="74" rx="12" fill="#111827" stroke="#38bdf8" stroke-width="1.5"/>
-    <text x="92" y="31" text-anchor="middle" fill="#f8fafc" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="700">SAFE FORECAST</text>
-    <text x="92" y="53" text-anchor="middle" fill="#94a3b8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10">STAGE 4</text>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 445" role="img" aria-labelledby="title desc">
+  <title id="title">HiCache++ runtime decision path</title>
+  <desc id="desc">Model-family policy, immutable budget, held-out audit, and full-compute fallback share one ledger.</desc>
+  <rect width="1200" height="445" rx="22" fill="#020617"/>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#64748b"/></marker>
+    <style>.t{font-family:Inter,Segoe UI,sans-serif;fill:#f8fafc}.m{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;fill:#cbd5e1}.muted{fill:#94a3b8}.line{fill:none;stroke:#64748b;stroke-width:2;marker-end:url(#arrow)}.dash{fill:none;stroke:#475569;stroke-width:1.5;stroke-dasharray:6 5}.box{fill:#111827;stroke:#334155;stroke-width:1.5}</style>
+  </defs>
+  <text class="t" x="38" y="46" font-size="25" font-weight="700">HiCache++ runtime decision path</text>
+  <text class="t muted" x="38" y="72" font-size="14">Model-family policy, immutable budget, held-out audit, and full-compute fallback share one ledger.</text>
+  <g transform="translate(28 175)"><rect class="box" width="170" height="80" rx="12" stroke="#38bdf8"/><text class="t" x="85" y="35" text-anchor="middle" font-size="14" font-weight="700">Workload identity</text><text class="m muted" x="85" y="58" text-anchor="middle" font-size="11">model · stage · schedule</text></g>
+  <path class="line" d="M198 215L245 215"/>
+  <path d="M325 145L405 215L325 285L245 215Z" fill="#172033" stroke="#38bdf8" stroke-width="1.5"/><text class="t" x="325" y="207" text-anchor="middle" font-size="13" font-weight="700">model family</text><text class="m muted" x="325" y="229" text-anchor="middle" font-size="10">declared / supported</text>
+  <path class="line" d="M405 190L480 140"/>
+  <g transform="translate(480 100)"><rect class="box" width="175" height="75" rx="12" stroke="#22c55e"/><text class="t" x="87.5" y="32.5" text-anchor="middle" font-size="14" font-weight="700">Flow matching</text><text class="m muted" x="87.5" y="55.5" text-anchor="middle" font-size="11">DMD / Prony</text></g>
+  <path class="line" d="M405 240L480 292"/>
+  <g transform="translate(480 255)"><rect class="box" width="175" height="75" rx="12" stroke="#a78bfa"/><text class="t" x="87.5" y="32.5" text-anchor="middle" font-size="14" font-weight="700">DiT denoising</text><text class="m muted" x="87.5" y="55.5" text-anchor="middle" font-size="11">Hermite</text></g>
+  <path class="line" d="M655 137L720 194"/>
+  <path class="line" d="M655 292L720 235"/>
+  <g transform="translate(720 165)"><rect class="box" width="175" height="100" rx="12" stroke="#f59e0b"/><text class="t" x="87.5" y="45" text-anchor="middle" font-size="14" font-weight="700">Budget guard</text><text class="m muted" x="87.5" y="68" text-anchor="middle" font-size="11">quality · cost · horizon</text></g>
+  <path class="line" d="M895 215L945 215"/>
+  <path d="M1010 155L1080 215L1010 275L945 215Z" fill="#172033" stroke="#f59e0b" stroke-width="1.5"/><text class="t" x="1010" y="207" text-anchor="middle" font-size="13" font-weight="700">audit passes?</text><text class="m muted" x="1010" y="229" text-anchor="middle" font-size="10">held-out error</text>
+  <path class="line" d="M1080 190L1158 140"/>
+  <path class="line" d="M1080 240L1158 292"/>
+  <text class="m" x="1170" y="136" text-anchor="end" font-size="11" fill="#22c55e">forecast</text><text class="m" x="1170" y="315" text-anchor="end" font-size="11" fill="#f59e0b">full model</text>
+  <rect x="245" y="360" width="835" height="48" rx="10" fill="#0f172a" stroke="#334155"/><text class="m" x="663" y="389" text-anchor="middle" font-size="12">append-only ledger: identity · decision · error · compute · fallback · manifest digest</text>
 </svg>
-

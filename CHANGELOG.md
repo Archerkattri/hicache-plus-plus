@@ -11,6 +11,14 @@ All notable changes, per version. Auto-generated from git tags by
   TRELLIS.2 consumer patches with horizon/memory/audit controls and actual
   decision-count reporting.
 
+## v1.3.0 — 2026-09-17
+
+- Enforce LF line endings with .gitattributes (2badd60)
+- docs: replace interim README visuals (d5ad8a6)
+- docs: refresh README visuals (45492e9)
+- wip: release readiness pass (ce709fa)
+- ci: update actions to Node 24 runtimes (f94e58b)
+
 ## v1.2.1 — 2026-07-02
 
 - release: 1.2.1 -- version sync (__version__ literal + pyproject + CITATION) with drift test

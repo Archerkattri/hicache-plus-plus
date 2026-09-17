@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hicache-plus-plus — Drop-in TaylorSeer/HiCache basis upgrade: training-free diffusion acceleration via Dynamic Mode Decomposition (Prony) exponential feature forecasting</title>
+<meta name="description" content="Feature caches (TaylorSeer, HiCache) skip the network on most denoising steps and forecast the cached features from recent compute-step anchors. HiCache++ adds the exponential (DMD/Prony) basis and a training-free holdout selector, with the basis picked by model family.">
+<style>
+  :root{
+    --bg:#ffffff; --ink:#17202a; --muted:#5a6572; --line:#e3e8ee;
+    --accent:#0c52d6; --accent-ink:#0c52d6; --code-bg:#f4f6f8; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    font-size:16px;line-height:1.6}
+  .wrap{max-width:860px;margin:0 auto;padding:0 22px}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  /* top bar */
+  .top{border-bottom:1px solid var(--line)}
+  .top .wrap{display:flex;align-items:baseline;gap:14px;padding-top:14px;padding-bottom:14px;flex-wrap:wrap}
+  .top .repo{font-weight:700;font-size:17px;color:var(--ink)}
+  .top .repo a{color:var(--ink)}
+  .top .ver{font-family:var(--mono);font-size:12px;color:var(--muted);border:1px solid var(--line);padding:1px 8px;border-radius:20px}
+  .top nav{margin-left:auto;display:flex;gap:16px;font-size:14px}
+  /* hero */
+  .hero{padding:34px 0 8px}
+  .hero img.banner{width:100%;height:auto;border:1px solid var(--line);display:block}
+  .hero h1{font-size:30px;line-height:1.25;margin:22px 0 6px;letter-spacing:-0.01em}
+  .hero p.lede{color:var(--muted);margin:0 0 14px;max-width:62ch}
+  pre{background:var(--code-bg);border:1px solid var(--line);padding:12px 14px;overflow-x:auto;
+    font-family:var(--mono);font-size:13px;line-height:1.55;margin:0 0 8px}
+  pre .c{color:#6a737d}
+  /* sections */
+  section{padding:26px 0 6px;border-top:1px solid var(--line);margin-top:26px}
+  section:first-of-type{border-top:0}
+  .sec-head{display:flex;align-items:baseline;gap:12px;margin-bottom:12px}
+  .sec-num{font-family:var(--mono);font-size:13px;color:var(--accent-ink);font-weight:700}
+  .sec-head h2{font-size:20px;margin:0}
+  table.ev{width:100%;border-collapse:collapse;font-size:14px}
+  table.ev th,table.ev td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  table.ev th{color:var(--muted);font-weight:600;width:34%}
+  table.ev td b{font-variant-numeric:tabular-nums}
+  .ok{color:#0a7b3c;font-weight:700}
+  .gallery{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .gallery figure{margin:0;border:1px solid var(--line)}
+  .gallery img,.gallery video{width:100%;height:auto;display:block}
+  .gallery figcaption{font-size:13px;color:var(--muted);padding:8px 10px;border-top:1px solid var(--line)}
+  .limits{background:#fbfcfd;border:1px solid var(--line);padding:14px 16px;font-size:14px}
+  .limits ul{margin:8px 0 0;padding-left:20px}
+  .limits li{margin:4px 0}
+  footer{border-top:1px solid var(--line);margin-top:30px;padding:16px 0 30px;color:var(--muted);font-size:13px}
+  footer .wrap{display:flex;gap:16px;flex-wrap:wrap}
+  @media (max-width:640px){.gallery{grid-template-columns:1fr}.hero h1{font-size:24px}}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <span class="repo"><a href="https://github.com/Archerkattri/hicache-plus-plus">hicache-plus-plus</a></span>
+  <span class="ver">1.3.0</span>
+  <nav><a href="https://github.com/Archerkattri/hicache-plus-plus">Code</a><a href="https://github.com/Archerkattri/hicache-plus-plus/releases/tag/v1.3.0">Release</a> <a href="https://pypi.org/project/hicache-pp/">PyPI</a></nav>
+</div></header>
+<main class="wrap">
+  <div class="hero">
+    <img class="banner" src="assets/banner.png" alt="hicache-plus-plus banner">
+    <h1>Exponential feature forecasting for training-free diffusion caching</h1>
+    <p class="lede">Feature caches (TaylorSeer, HiCache) skip the network on most denoising steps and forecast the cached features from recent compute-step anchors. HiCache++ adds the exponential (DMD/Prony) basis and a training-free holdout selector, with the basis picked by model family.</p>
+    <pre>pip install hicache-pp</pre>
+  </div>
+  <section><div class="sec-head"><span class="sec-num">01</span><h2>Evidence</h2></div>
+    <table class="ev"><tr><th>Synthetic feature-ODE forecast, H=8</th><td><b>2.2e-7</b> rel. L2 error for the exponential basis vs 6.5e0 (monomial) and 1.2e0 (rational)</td></tr><tr><th>Regime-switch detection (auto holdout)</th><td><b>120/120</b> windows detected; long-horizon error contained at 1.56 vs 9.40 forced-exponential</td></tr><tr><th>Hunyuan3D-2.1, interval 5</th><td><b>0.860</b> F-score@0.05 (DMD) vs 0.735 Hermite arm at 1.79x speedup; lead grows to +0.24 at i6</td></tr><tr><th>Hunyuan3D-2-mini, interval 5</th><td><b>0.794 = baseline</b>, exactly lossless F-score@0.05</td></tr><tr><th>SAM3D, DMD interval 6</th><td><b>F1 = 1.000</b> geometry-lossless vs baseline at 1.56x speedup (CD 0.013)</td></tr><tr><th>TRELLIS v1 sparse-structure stage</th><td><b>0.829</b> F-score@0.05 at 2.76x, −0.010 vs vanilla (Hermite 0.825, −0.014)</td></tr><tr><th>DiT-XL/2 corrected polynomial ladder</th><td><b>2.27</b> paired-noise FID drift (TaylorSeer, 3.81x); corrected Hermite 3.54 / 6.46 / 10.74 at i4 / i6 / i8</td></tr><tr><th>Per-window eigendecomposition cache</th><td><b>483 ms/img</b> for dmd_i4 (was 566; 3.17x → 3.71x), 2.5–3.1x cheaper per forecast on CPU</td></tr></table>
+  </section>
+  <section><div class="sec-head"><span class="sec-num">02</span><h2>Media</h2></div>
+    <div class="gallery"><figure><img src="assets/readme_flow.svg" alt="Runtime decision path"><figcaption>Runtime decision path: a content-bound budget selects the backend, audits held-out error, then forecasts or evaluates.</figcaption></figure><figure><img src="assets/flux_ab_chroma.png" alt="FLUX A/B on Chroma1-HD: vanilla vs TaylorSeer vs DMD"><figcaption>FLUX-class A/B on Chroma1-HD (same seed): vanilla / TaylorSeer / DMD at 1.00x / 1.05x / 1.11x with parity images.</figcaption></figure></div>
+  </section>
+  <section><div class="sec-head"><span class="sec-num">03</span><h2>Install &amp; verify</h2></div>
+    <pre>python -m hicache_pp.hermite     <span class="c"># Hermite basis + schedule + sign-convention regressions</span>
+python -m hicache_pp.dmd         <span class="c"># exponential basis + auto holdout modes + eigencache</span>
+python -m hicache_pp.tree        <span class="c"># tree-aware Hermite + exponential + Adaptive-CFG + eigencache</span>
+python tests/run_tests.py        <span class="c"># full CPU suite, passes 30 tests; also pytest-discoverable</span></pre>
+  </section>
+  <section><div class="sec-head"><span class="sec-num">04</span><h2>Limits</h2></div>
+    <div class="limits"><p style="margin:0">What this release does <b>not</b> claim (from the release notes):</p><ul><li>GPU-gated benchmark cells (FLUX/DMD head-to-heads need CUDA).</li></ul></div>
+  </section>
+</main>
+<footer><div class="wrap"><span>MIT · © 2026 Krishi Attri</span><span>Attri, hicache-plus-plus, 1.3.0, https://doi.org/10.5281/zenodo.20618824</span><span style="margin-left:auto"><a href="https://github.com/Archerkattri/hicache-plus-plus">hicache-plus-plus</a></span></div></footer>
+</body>
+</html>

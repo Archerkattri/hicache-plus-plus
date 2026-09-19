@@ -12,8 +12,13 @@
 <style>
   :root{
     --bg:#ffffff; --ink:#17202a; --muted:#5a6572; --line:#e3e8ee;
-    --accent:#0c52d6; --accent-ink:#0c52d6; --code-bg:#f4f6f8; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --accent:#0c52d6; --accent-ink:#0c52d6; --code-bg:#f4f6f8; --panel:#fbfcfd; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   }
+  :root[data-theme="dark"]{--bg:#0d1117; --ink:#e6edf3; --muted:#8b949e; --line:#21262d; --accent:#4493f8; --accent-ink:#4493f8; --code-bg:#161b22; --panel:#161b22;}
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){--bg:#0d1117; --ink:#e6edf3; --muted:#8b949e; --line:#21262d; --accent:#4493f8; --accent-ink:#4493f8; --code-bg:#161b22; --panel:#161b22;}
+  }
+  #theme-toggle{background:transparent;border:1px solid var(--line);border-radius:6px;color:inherit;font:inherit;font-size:13px;padding:0 8px;cursor:pointer;line-height:1.6}
   *{box-sizing:border-box}
   html{-webkit-text-size-adjust:100%}
   body{margin:0;background:var(--bg);color:var(--ink);
@@ -52,19 +57,20 @@
   .gallery figure{margin:0;border:1px solid var(--line)}
   .gallery img,.gallery video{width:100%;height:auto;display:block}
   .gallery figcaption{font-size:13px;color:var(--muted);padding:8px 10px;border-top:1px solid var(--line)}
-  .limits{background:#fbfcfd;border:1px solid var(--line);padding:14px 16px;font-size:14px}
+  .limits{background:var(--panel);border:1px solid var(--line);padding:14px 16px;font-size:14px}
   .limits ul{margin:8px 0 0;padding-left:20px}
   .limits li{margin:4px 0}
   footer{border-top:1px solid var(--line);margin-top:30px;padding:16px 0 30px;color:var(--muted);font-size:13px}
   footer .wrap{display:flex;gap:16px;flex-wrap:wrap}
   @media (max-width:640px){.gallery{grid-template-columns:1fr}.hero h1{font-size:24px}}
 </style>
+<script>(function(){try{var s=localStorage.getItem("theme");if(s==="dark"||s==="light")document.documentElement.setAttribute("data-theme",s);}catch(e){}})();</script>
 </head>
 <body>
 <header class="top"><div class="wrap">
   <span class="repo"><a href="https://github.com/Archerkattri/hicache-plus-plus">hicache-plus-plus</a></span>
   <span class="ver">1.3.0</span>
-  <nav><a href="https://github.com/Archerkattri/hicache-plus-plus">Code</a><a href="https://github.com/Archerkattri/hicache-plus-plus/releases/tag/v1.3.0">Release</a> <a href="https://pypi.org/project/hicache-pp/">PyPI</a></nav>
+  <nav><a href="https://github.com/Archerkattri/hicache-plus-plus">Code</a><a href="https://github.com/Archerkattri/hicache-plus-plus/releases/tag/v1.3.0">Release</a> <a href="https://pypi.org/project/hicache-pp/">PyPI</a><button id="theme-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">◐</button></nav>
 </div></header>
 <main class="wrap">
   <div class="hero">
@@ -93,5 +99,6 @@ python tests/run_tests.py        <span class="c"># full CPU suite, passes 30 tes
   </section>
 </main>
 <footer><div class="wrap"><span>MIT · © 2026 Krishi Attri</span><span>Attri, hicache-plus-plus, 1.3.0, https://doi.org/10.5281/zenodo.20618824</span><span style="margin-left:auto"><a href="https://github.com/Archerkattri/hicache-plus-plus">hicache-plus-plus</a></span></div></footer>
+<script>(function(){var d=document.documentElement;var b=document.getElementById("theme-toggle");if(!b)return;b.addEventListener("click",function(){var cur=d.getAttribute("data-theme");var dark=cur?cur==="dark":window.matchMedia("(prefers-color-scheme: dark)").matches;var next=dark?"light":"dark";d.setAttribute("data-theme",next);try{localStorage.setItem("theme",next);}catch(e){}});})();</script>
 </body>
 </html>

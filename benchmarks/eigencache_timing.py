@@ -6,8 +6,8 @@ cannot change between two compute steps, so the pre-1.2 fit-per-skip-step was pu
 waste. This script measures the per-forecast wall-clock of the stateful path with
 the cache active vs the same path with the cache key cleared before every call
 (which reproduces the pre-1.2 fit-every-call behavior exactly), at DiT-like feature
-sizes. Correctness of the cache (<1e-12 vs the uncached path) is asserted in the
-module self-tests; this file is timing only. GPU timing happens on the GPU resume.
+sizes. Correctness of the cache (<1e-12 vs the uncached path) was checked by the
+module self-checks then present; this file is timing only. GPU timing happens on the GPU resume.
 
 CPU only; runs in well under a minute.  Usage:  python benchmarks/eigencache_timing.py
 """

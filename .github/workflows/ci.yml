@@ -10,8 +10,8 @@ on:
     branches: [master]
 
 jobs:
-  test:
-    name: CPU self-tests (no GPU, no model)
+  package-smoke:
+    name: CPU package smoke (no GPU, no model)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -28,7 +28,5 @@ jobs:
           pip install --index-url https://download.pytorch.org/whl/cpu torch
           pip install numpy
           pip install -e .
-      - name: Run CPU test suite
-        # tests/run_tests.py exercises the hermite/dmd/tree module self-tests plus
-        # the DiT-harness forecast + checkpoint tests on CPU (no GPU, no model).
+      - name: Run benchmark, adapter, and package integration checks
         run: python tests/run_tests.py

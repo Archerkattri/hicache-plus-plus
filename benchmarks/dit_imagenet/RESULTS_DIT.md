@@ -222,7 +222,7 @@ CUDA_VISIBLE_DEVICES=0 OMP_NUM_THREADS=2 ../../../../gim_env/bin/python bench_di
 4. ~~`bench_dit.py` has no mid-cell checkpointing: a killed 50k cell restarts from 0.~~
    FIXED 2026-06-10: per-1k-image atomic checkpointing (`<cell>.partial.npz`, resumed
    automatically; final npz format unchanged; resumed stats bit-identical to an
-   uninterrupted run, see `tests/test_bench_checkpoint.py`). Cells generated before
+   uninterrupted run). Cells generated before
    the fix were single-shot runs and are unaffected.
 5. The Phase-1 smoke observation (auto 837 vs hermite 486 ms/img at batch 32) was the
    pre-eigencache DMD/auto per-skip SVD overhead; the eigencache + re-time above is the

@@ -127,8 +127,8 @@ forecast must evaluate at `x = +k` (the upstream TaylorSeer convention). Since
 `Htilde_n(-x) = (-1)^n Htilde_n(x)`, every odd-order term flipped sign and the shipped
 forecast extrapolated BACKWARDS by exactly the amount it should move forward. The bug
 was ours, introduced in porting; it is fixed as of this section, with closed-form
-regression tests (exact forward extrapolation on a linear series at `sigma = sqrt(1/2)`)
-in the hermite and tree self-tests.
+regression checks (exact forward extrapolation on a linear series at `sigma = sqrt(1/2)`)
+in the Hermite and tree module self-checks that shipped with that benchmark revision.
 
 Provenance of the tables in this file: the scenario tables ABOVE this section were
 REGENERATED after the fix (2026-06-10; they show the fixed +k Hermite, both auto
@@ -247,7 +247,7 @@ this is the basis of the shipped regression tests.
 The stateful DMD paths (`dmd_forecast_state`, `dmd_forecast_tree`, the `auto` serve
 path) now cache (Phi, lambda, b) per compute window and recompute only when a new
 snapshot arrives; between snapshots the fit inputs cannot change, so the pre-1.2
-fit-per-skip-step was pure waste. Correctness: the module self-tests assert the
+fit-per-skip-step was pure waste. At that benchmark revision, module self-checks asserted the
 cached path matches the uncached fit-per-call path to <1e-12 across scenarios,
 horizons, and cache invalidations (bit-equality is unattainable because CPU LAPACK
 svd/eig is run-to-run nondeterministic at ~1e-16 even for identical calls).

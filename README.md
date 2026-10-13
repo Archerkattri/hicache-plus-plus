@@ -155,6 +155,12 @@ validation fields. The manifest rejects tensors, prompts, images and local
 paths; it is suitable for attaching to an adapter benchmark without collecting
 private inputs.
 
+The method-neutral budget/runtime also accepts `backend="taylor"` for adapters
+that implement Taylor forecasting themselves. This labels and bounds their
+actual decisions; it does not add Taylor to the Hermite/DMD tensor APIs or
+establish model quality or performance. The ACC16 TRELLIS adapter restricts
+this method to `sparse_structure` with `fallback="full"`.
+
 If you already run TaylorSeer or HiCache this is a basis swap, not a new pipeline: the
 compute/skip schedule, warm-up and API stay identical. Only the per-skip forecast formula
 changes. Backends: `"hermite"` (corrected HiCache polynomial; pick this for DiT-class

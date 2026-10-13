@@ -24,7 +24,10 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 
-FORECAST_METHODS = ("hermite", "dmd", "auto")
+# Operational labels only: accepting a method does not implement its formula.
+# Taylor adapters retain their own monomial forecast; the Hermite/DMD tensor
+# APIs deliberately keep their separate, narrower backend validation.
+FORECAST_METHODS = ("hermite", "dmd", "auto", "taylor")
 DECISION_MODES = ("full", "forecast", "fallback")
 _HEX_DIGEST = re.compile(r"^(?:sha(?:1|224|256|384|512):)?[0-9a-fA-F]{32,128}$")
 _PRIVATE_KEYS = ("path", "filename", "filepath", "prompt", "image", "tensor", "latent")
@@ -113,9 +116,9 @@ class CacheBudget:
         backend = str(self.backend).strip().lower()
         fallback = str(self.fallback).strip().lower()
         if backend not in (*FORECAST_METHODS, "full"):
-            raise ValueError("backend must be full, hermite, dmd or auto")
+            raise ValueError(f"backend must be one of {(*FORECAST_METHODS, 'full')}")
         if fallback not in (*FORECAST_METHODS, "full"):
-            raise ValueError("fallback must be full, hermite, dmd or auto")
+            raise ValueError(f"fallback must be one of {(*FORECAST_METHODS, 'full')}")
         if not self.allowed_stages:
             raise ValueError("allowed_stages must contain at least one stage")
         stages = tuple(dict.fromkeys(_public_token(stage, field="stage") for stage in self.allowed_stages))
@@ -488,7 +491,7 @@ class CacheBudgetRuntime:
         horizon = int(horizon)
         requested = self.budget.backend if method is None else str(method).strip().lower()
         if requested not in (*FORECAST_METHODS, "full"):
-            raise ValueError("method must be full, hermite, dmd or auto")
+            raise ValueError(f"method must be one of {(*FORECAST_METHODS, 'full')}")
         if memory_mb is not None:
             memory_mb = _finite_nonnegative(memory_mb, field="memory_mb")
         if predicted_error is not None:

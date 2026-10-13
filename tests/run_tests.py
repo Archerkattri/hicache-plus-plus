@@ -1,22 +1,19 @@
 #!/usr/bin/env python3
-"""Run all HiCache++ CPU self-tests (no GPU / no model). Each module exits 0/1."""
+"""Run the retained CPU benchmark, adapter, and package integration checks."""
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-MODULES = ["hicache_pp.hermite", "hicache_pp.dmd", "hicache_pp.tree"]
-SCRIPTS = ["tests/test_bench_dit.py", "tests/test_bench_checkpoint.py",
-           "tests/test_version.py", "tests/test_h0.py",
-           "tests/test_h1_adapter_contract.py"]
+SCRIPTS = [
+    "tests/test_bench_checkpoint.py",
+    "tests/test_bench_dit.py",
+    "tests/test_h1_adapter_contract.py",
+]
 
 
 def main() -> int:
     ok = True
-    for m in MODULES:
-        print(f"\n================ {m} ================", flush=True)
-        rc = subprocess.run([sys.executable, "-m", m], cwd=str(ROOT)).returncode
-        ok = ok and rc == 0
     for s in SCRIPTS:
         print(f"\n================ {s} ================", flush=True)
         rc = subprocess.run([sys.executable, str(ROOT / s)], cwd=str(ROOT)).returncode

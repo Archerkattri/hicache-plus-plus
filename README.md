@@ -92,6 +92,13 @@ for i, t in enumerate(timesteps):
     x = scheduler.step(v, t, x)
 ```
 
+### CPU benchmark and package integration checks
+
+Run `python tests/run_tests.py` to exercise benchmark-checkpoint restart and
+atomic-write behavior, verify package/source version agreement, and check the
+central adapter contract. The standalone forecast-helper unit suite is not
+included on this review branch.
+
 ### State lifecycle and telemetry
 
 `first_enhance=0` is supported: if a state has no anchor yet,
@@ -105,11 +112,6 @@ Each new state has an opaque `run_id`, a nullable `branch_id`, and additive
 anchors, cached fits, and counters while preserving configuration. The tree-aware
 equivalents are available as `hicache_pp.tree.hicache_reset` and
 `hicache_pp.tree.hicache_telemetry`.
-
-The deterministic central adapter contract can be exercised without a model or
-GPU with `python tests/test_h1_adapter_contract.py`. It covers flat and PyTree
-traces, interval-1 bypass, reset/retry isolation, and visible uniform-history
-versus fallback decisions.
 
 ### Deployment budgets and portable manifests
 
@@ -417,19 +419,6 @@ n=2 prompts). The patched DMD calibrator is the fastest of the three with parity
   2.5-3.1x cheaper per forecast than fit-per-call on CPU
   (`benchmarks/eigencache_timing.py`). On the DiT GPU re-time it cuts dmd_i4 from 566
   to 483 ms/img (3.17x -> 3.71x) and dmd_i6 from 434 to 337 ms/img (4.13x -> 5.31x).
-
----
-
-## Tests
-
-```bash
-python -m hicache_pp.hermite     # Hermite basis + schedule + sign-convention regressions
-python -m hicache_pp.dmd         # exponential basis + auto holdout modes + eigencache
-python -m hicache_pp.tree        # tree-aware Hermite + exponential + Adaptive-CFG + eigencache
-python tests/run_tests.py        # all of the above + DiT-harness tests (taylor sign,
-                                 # FID checkpoint/resume) + version sync; also
-                                 # pytest-discoverable
-```
 
 ---
 

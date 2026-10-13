@@ -11,6 +11,12 @@ All notable changes, per version. Auto-generated from git tags by
   TRELLIS.2 consumer patches with horizon/memory/audit controls and actual
   decision-count reporting.
 
+## v1.3.1 — 2026-10-13
+
+- Accept `taylor` as a method-neutral budget/runtime token for consumer-owned
+  forecasting adapters; no Taylor forecast formula or model-quality claim is
+  added to the shared HiCache++ tensor APIs.
+
 ## v1.3.0 — 2026-09-17
 
 - Enforce LF line endings with .gitattributes (2badd60)
